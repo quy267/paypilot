@@ -1,69 +1,75 @@
-import { Suspense, useCallback, useState, useEffect, useRef } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
-import type { MCPServersState } from "agents";
 import type { TriageAgent } from "./server";
-import {
-  Badge,
-  Button,
-  Empty,
-  InputArea,
-  Surface,
-  Switch,
-  Text
-} from "@cloudflare/kumo";
-import { Toasty, useKumoToastManager } from "@cloudflare/kumo/components/toast";
+import type { ResolutionRow, TransactionRow } from "./services/triage";
+import { Badge, Button, Empty, InputArea, Surface, Text } from "@cloudflare/kumo";
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import {
-  PaperPlaneRightIcon,
-  StopIcon,
-  TrashIcon,
-  GearIcon,
-  ChatCircleDotsIcon,
-  CircleIcon,
-  MoonIcon,
-  SunIcon,
-  CheckCircleIcon,
-  XCircleIcon,
+  ArrowsClockwiseIcon,
   BrainIcon,
   CaretDownIcon,
-  BugIcon,
-  PlugsConnectedIcon,
-  PlusIcon,
-  SignInIcon,
-  XIcon,
-  WrenchIcon,
-  PaperclipIcon,
-  ImageIcon
+  CheckCircleIcon,
+  CircleIcon,
+  GearIcon,
+  MoonIcon,
+  ReceiptIcon,
+  SparkleIcon,
+  StopIcon,
+  SunIcon,
+  WarningIcon,
+  XCircleIcon
 } from "@phosphor-icons/react";
 
-// ── Attachment helpers ────────────────────────────────────────────────
-
-interface Attachment {
-  id: string;
-  file: File;
-  preview: string;
-  mediaType: string;
+// ── Types coming back from the JSON API ───────────────────────────────
+interface TransactionDetail {
+  transaction: TransactionRow;
+  evidence: Record<string, unknown>;
+  resolutions: ResolutionRow[];
 }
 
-function createAttachment(file: File): Attachment {
-  return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    file,
-    preview: URL.createObjectURL(file),
-    mediaType: file.type || "application/octet-stream"
-  };
+// ── Display helpers ───────────────────────────────────────────────────
+
+/** Format a minor-unit integer as VND, e.g. 52000000 -> "52.000.000 ₫". */
+function vnd(minor: number, currency = "VND"): string {
+  const grouped = Math.round(minor)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return currency === "VND" ? `${grouped} ₫` : `${grouped} ${currency}`;
 }
 
-function fileToDataUri(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+// Vietnamese labels for the enum values stored in the DB.
+const STATUS_LABEL: Record<string, string> = {
+  FAILED: "Lỗi",
+  FLAGGED: "Nghi ngờ",
+  PENDING: "Đang chờ",
+  SUCCESS: "Thành công"
+};
+const ACTION_LABEL: Record<string, string> = {
+  RETRY: "Thử lại",
+  ESCALATE: "Chuyển cấp trên",
+  REFUND: "Hoàn tiền"
+};
+const DECISION_LABEL: Record<string, string> = {
+  PENDING: "Chờ duyệt",
+  APPROVED: "Đã duyệt",
+  REJECTED: "Từ chối"
+};
+
+/** Tailwind text colour per transaction status (a small status dot). */
+function statusColor(status: string): string {
+  switch (status) {
+    case "FLAGGED":
+      return "text-amber-500";
+    case "FAILED":
+      return "text-red-500";
+    case "PENDING":
+      return "text-blue-400";
+    default:
+      return "text-emerald-500";
+  }
 }
 
 // ── Small components ──────────────────────────────────────────────────
@@ -72,7 +78,6 @@ function ThemeToggle() {
   const [dark, setDark] = useState(
     () => document.documentElement.getAttribute("data-mode") === "dark"
   );
-
   const toggle = useCallback(() => {
     const next = !dark;
     setDark(next);
@@ -81,853 +86,580 @@ function ThemeToggle() {
     document.documentElement.style.colorScheme = mode;
     localStorage.setItem("theme", mode);
   }, [dark]);
-
   return (
     <Button
       variant="secondary"
       shape="square"
       icon={dark ? <SunIcon size={16} /> : <MoonIcon size={16} />}
       onClick={toggle}
-      aria-label="Toggle theme"
+      aria-label="Đổi giao diện sáng/tối"
     />
   );
 }
 
-// ── Tool rendering ────────────────────────────────────────────────────
-
-function ToolPartView({
-  part,
-  addToolApprovalResponse
-}: {
-  part: UIMessage["parts"][number];
-  addToolApprovalResponse: (response: {
-    id: string;
-    approved: boolean;
-  }) => void;
-}) {
+/** Compact chip for one agent tool call (e.g. "listInbox ✓"). */
+function ToolChip({ part }: { part: UIMessage["parts"][number] }) {
   if (!isToolUIPart(part)) return null;
-  const toolName = getToolName(part);
-
-  // Completed
-  if (part.state === "output-available") {
-    return (
-      <div className="flex justify-start">
-        <Surface className="max-w-[85%] px-4 py-2.5 rounded-xl ring ring-kumo-line">
-          <div className="flex items-center gap-2 mb-1">
-            <GearIcon size={14} className="text-kumo-inactive" />
-            <Text size="xs" variant="secondary" bold>
-              {toolName}
-            </Text>
-            <Badge variant="secondary">Done</Badge>
-          </div>
-          <div className="font-mono">
-            <Text size="xs" variant="secondary">
-              {JSON.stringify(part.output, null, 2)}
-            </Text>
-          </div>
-        </Surface>
-      </div>
-    );
-  }
-
-  // Needs approval
-  if ("approval" in part && part.state === "approval-requested") {
-    const approvalId = (part.approval as { id?: string })?.id;
-    return (
-      <div className="flex justify-start">
-        <Surface className="max-w-[85%] px-4 py-3 rounded-xl ring-2 ring-kumo-warning">
-          <div className="flex items-center gap-2 mb-2">
-            <GearIcon size={14} className="text-kumo-warning" />
-            <Text size="sm" bold>
-              Approval needed: {toolName}
-            </Text>
-          </div>
-          <div className="font-mono mb-3">
-            <Text size="xs" variant="secondary">
-              {JSON.stringify(part.input, null, 2)}
-            </Text>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<CheckCircleIcon size={14} />}
-              onClick={() => {
-                if (approvalId) {
-                  addToolApprovalResponse({ id: approvalId, approved: true });
-                }
-              }}
-            >
-              Approve
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={<XCircleIcon size={14} />}
-              onClick={() => {
-                if (approvalId) {
-                  addToolApprovalResponse({ id: approvalId, approved: false });
-                }
-              }}
-            >
-              Reject
-            </Button>
-          </div>
-        </Surface>
-      </div>
-    );
-  }
-
-  // Rejected / denied
-  if (
-    part.state === "output-denied" ||
-    ("approval" in part &&
-      (part.approval as { approved?: boolean })?.approved === false)
-  ) {
-    return (
-      <div className="flex justify-start">
-        <Surface className="max-w-[85%] px-4 py-2.5 rounded-xl ring ring-kumo-line">
-          <div className="flex items-center gap-2">
-            <XCircleIcon size={14} className="text-kumo-danger" />
-            <Text size="xs" variant="secondary" bold>
-              {toolName}
-            </Text>
-            <Badge variant="secondary">Rejected</Badge>
-          </div>
-        </Surface>
-      </div>
-    );
-  }
-
-  // Executing
-  if (part.state === "input-available" || part.state === "input-streaming") {
-    return (
-      <div className="flex justify-start">
-        <Surface className="max-w-[85%] px-4 py-2.5 rounded-xl ring ring-kumo-line">
-          <div className="flex items-center gap-2">
-            <GearIcon size={14} className="text-kumo-inactive animate-spin" />
-            <Text size="xs" variant="secondary">
-              Running {toolName}...
-            </Text>
-          </div>
-        </Surface>
-      </div>
-    );
-  }
-
-  return null;
+  const name = getToolName(part);
+  const running =
+    part.state === "input-available" || part.state === "input-streaming";
+  return (
+    <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-kumo-control text-xs text-kumo-default">
+      <GearIcon
+        size={12}
+        className={running ? "animate-spin text-kumo-brand" : "text-kumo-success"}
+      />
+      <span className="font-mono">{name}</span>
+      {running ? "…" : "✓"}
+    </span>
+  );
 }
 
-// ── Main chat ─────────────────────────────────────────────────────────
+/** Renders the agent's live activity: tool chips, reasoning, final text. */
+function AgentActivity({
+  messages,
+  isStreaming
+}: {
+  messages: UIMessage[];
+  isStreaming: boolean;
+}) {
+  if (messages.length === 0) return null;
+  return (
+    <div className="space-y-3">
+      {messages.map((message, index) => {
+        const isUser = message.role === "user";
+        const isLastAssistant =
+          message.role === "assistant" && index === messages.length - 1;
+        const toolParts = message.parts.filter(isToolUIPart);
+        const reasoningParts = message.parts.filter(
+          (p) => p.type === "reasoning" && (p as { text?: string }).text?.trim()
+        );
+        const textParts = message.parts.filter((p) => p.type === "text");
 
-function Chat() {
+        if (isUser) {
+          const text = textParts
+            .map((p) => (p as { text: string }).text)
+            .join(" ");
+          if (!text) return null;
+          return (
+            <div key={message.id} className="text-xs text-kumo-subtle italic">
+              ▶ {text}
+            </div>
+          );
+        }
+
+        return (
+          <div key={message.id} className="space-y-2">
+            {toolParts.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {toolParts.map((part) => (
+                  <ToolChip key={part.toolCallId} part={part} />
+                ))}
+              </div>
+            )}
+
+            {reasoningParts.map((part, i) => {
+              const r = part as {
+                text: string;
+                state?: "streaming" | "done";
+              };
+              const done = r.state === "done" || !isStreaming;
+              return (
+                <details key={i} open={!done} className="w-full">
+                  <summary className="flex items-center gap-2 cursor-pointer px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-xs select-none">
+                    <BrainIcon size={13} className="text-purple-400" />
+                    <span className="font-medium text-kumo-default">
+                      Suy luận của AI
+                    </span>
+                    <span className="text-kumo-subtle">
+                      {done ? "Hoàn tất" : "Đang nghĩ…"}
+                    </span>
+                    <CaretDownIcon
+                      size={13}
+                      className="ml-auto text-kumo-inactive"
+                    />
+                  </summary>
+                  <pre className="mt-1.5 px-3 py-2 rounded-lg bg-kumo-control text-xs whitespace-pre-wrap overflow-auto max-h-56">
+                    {r.text}
+                  </pre>
+                </details>
+              );
+            })}
+
+            {textParts.map((part, i) => {
+              const text = (part as { text: string }).text;
+              if (!text) return null;
+              return (
+                <div
+                  key={i}
+                  className="rounded-xl bg-kumo-base ring ring-kumo-line"
+                >
+                  <Streamdown
+                    className="sd-theme p-3 text-sm"
+                    plugins={{ code }}
+                    controls={false}
+                    isAnimating={isLastAssistant && isStreaming}
+                  >
+                    {text}
+                  </Streamdown>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Inbox (left pane) ─────────────────────────────────────────────────
+
+function InboxList({
+  items,
+  selectedId,
+  onSelect
+}: {
+  items: TransactionRow[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="p-6">
+        <Empty
+          icon={<CheckCircleIcon size={28} />}
+          title="Hộp xử lý trống"
+          contents={<Text size="sm" variant="secondary">Không có giao dịch nào cần xử lý.</Text>}
+        />
+      </div>
+    );
+  }
+  return (
+    <ul className="divide-y divide-kumo-line">
+      {items.map((t) => {
+        const active = t.id === selectedId;
+        return (
+          <li key={t.id}>
+            <button
+              type="button"
+              onClick={() => onSelect(t.id)}
+              className={`w-full text-left px-4 py-3 transition-colors ${
+                active ? "bg-kumo-control" : "hover:bg-kumo-control/50"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <CircleIcon
+                    size={8}
+                    weight="fill"
+                    className={statusColor(t.status)}
+                  />
+                  <span className="font-mono text-sm text-kumo-default truncate">
+                    {t.id}
+                  </span>
+                </span>
+                <span className="text-sm font-medium text-kumo-default shrink-0">
+                  {vnd(t.amount_minor, t.currency)}
+                </span>
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <Badge variant="secondary">{STATUS_LABEL[t.status] ?? t.status}</Badge>
+                <span className="text-xs text-kumo-subtle">{t.method}</span>
+                {t.failure_reason && (
+                  <span className="text-xs text-kumo-subtle truncate">
+                    · {t.failure_reason}
+                  </span>
+                )}
+              </div>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// ── Transaction detail + resolution (right pane) ──────────────────────
+
+function ResolutionCard({
+  resolution,
+  onDecide,
+  deciding
+}: {
+  resolution: ResolutionRow;
+  onDecide: (id: string, decision: "APPROVED" | "REJECTED") => void;
+  deciding: boolean;
+}) {
+  const pending = resolution.operator_decision === "PENDING";
+  return (
+    <Surface className="rounded-xl ring ring-kumo-line p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <Text size="sm" bold>
+          Đề xuất của AI
+        </Text>
+        <Badge variant={pending ? "primary" : "secondary"}>
+          {DECISION_LABEL[resolution.operator_decision]}
+        </Badge>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+        <span>
+          Hành động:{" "}
+          <span className="font-semibold text-kumo-default">
+            {ACTION_LABEL[resolution.proposed_action ?? ""] ??
+              resolution.proposed_action}
+          </span>
+        </span>
+        {resolution.confidence != null && (
+          <span className="text-kumo-subtle">
+            Độ tin cậy: {(resolution.confidence * 100).toFixed(0)}%
+          </span>
+        )}
+      </div>
+
+      {resolution.ai_diagnosis && (
+        <Text size="sm" variant="secondary">
+          {resolution.ai_diagnosis}
+        </Text>
+      )}
+
+      {pending ? (
+        <div className="flex gap-2 pt-1">
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<CheckCircleIcon size={15} />}
+            disabled={deciding}
+            onClick={() => onDecide(resolution.id, "APPROVED")}
+          >
+            Duyệt
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<XCircleIcon size={15} />}
+            disabled={deciding}
+            onClick={() => onDecide(resolution.id, "REJECTED")}
+          >
+            Từ chối
+          </Button>
+        </div>
+      ) : (
+        <Text size="xs" variant="secondary">
+          {resolution.operator_id ? `Bởi ${resolution.operator_id}` : ""}
+          {resolution.operator_note ? ` — ${resolution.operator_note}` : ""}
+        </Text>
+      )}
+    </Surface>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex justify-between gap-3 py-1 text-sm">
+      <span className="text-kumo-subtle">{label}</span>
+      <span className="text-kumo-default font-medium text-right">{value}</span>
+    </div>
+  );
+}
+
+// ── Main app ──────────────────────────────────────────────────────────
+
+function PayPilot() {
   const [connected, setConnected] = useState(false);
-  const [input, setInput] = useState("");
-  const [showDebug, setShowDebug] = useState(false);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const toasts = useKumoToastManager();
-  const [mcpState, setMcpState] = useState<MCPServersState>({
-    prompts: [],
-    resources: [],
-    servers: {},
-    tools: []
-  });
-  const [showMcpPanel, setShowMcpPanel] = useState(false);
-  const [mcpName, setMcpName] = useState("");
-  const [mcpUrl, setMcpUrl] = useState("");
-  const [isAddingServer, setIsAddingServer] = useState(false);
-  const mcpPanelRef = useRef<HTMLDivElement>(null);
+  const [inbox, setInbox] = useState<TransactionRow[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<TransactionDetail | null>(null);
+  const [deciding, setDeciding] = useState(false);
+  const [followUp, setFollowUp] = useState("");
+  const wasStreaming = useRef(false);
 
   const agent = useAgent<TriageAgent>({
     agent: "TriageAgent",
     onOpen: useCallback(() => setConnected(true), []),
     onClose: useCallback(() => setConnected(false), []),
     onError: useCallback(
-      (error: Event) => console.error("WebSocket error:", error),
+      (e: Event) => console.error("WebSocket error:", e),
       []
-    ),
-    onMcpUpdate: useCallback((state: MCPServersState) => {
-      setMcpState(state);
-    }, []),
-    onMessage: useCallback(
-      (message: MessageEvent) => {
-        try {
-          const data = JSON.parse(String(message.data));
-          if (data.type === "scheduled-task") {
-            toasts.add({
-              title: "Scheduled task completed",
-              description: data.description,
-              timeout: 0
-            });
-          }
-        } catch {
-          // Not JSON or not our event
-        }
-      },
-      [toasts]
     )
   });
 
-  // Close MCP panel when clicking outside
-  useEffect(() => {
-    if (!showMcpPanel) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (
-        mcpPanelRef.current &&
-        !mcpPanelRef.current.contains(e.target as Node)
-      ) {
-        setShowMcpPanel(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showMcpPanel]);
-
-  const handleAddServer = async () => {
-    if (!mcpName.trim() || !mcpUrl.trim()) return;
-    setIsAddingServer(true);
-    try {
-      await agent.stub.addServer(mcpName.trim(), mcpUrl.trim());
-      setMcpName("");
-      setMcpUrl("");
-    } catch (e) {
-      console.error("Failed to add MCP server:", e);
-    } finally {
-      setIsAddingServer(false);
-    }
-  };
-
-  const handleRemoveServer = async (serverId: string) => {
-    try {
-      await agent.stub.removeServer(serverId);
-    } catch (e) {
-      console.error("Failed to remove MCP server:", e);
-    }
-  };
-
-  const serverEntries = Object.entries(mcpState.servers);
-  const mcpToolCount = mcpState.tools.length;
-
-  const {
-    messages,
-    sendMessage,
-    clearHistory,
-    addToolApprovalResponse,
-    stop,
-    status
-  } = useAgentChat({
-    agent,
-    onToolCall: async (event) => {
-      if (
-        "addToolOutput" in event &&
-        event.toolCall.toolName === "getUserTimezone"
-      ) {
-        event.addToolOutput({
-          toolCallId: event.toolCall.toolCallId,
-          output: {
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            localTime: new Date().toLocaleTimeString()
-          }
-        });
-      }
-    }
+  const { messages, sendMessage, clearHistory, status, stop } = useAgentChat({
+    agent
   });
-
   const isStreaming = status === "streaming" || status === "submitted";
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  // Re-focus the input after streaming ends
-  useEffect(() => {
-    if (!isStreaming && textareaRef.current) {
-      textareaRef.current.focus();
+  const refreshInbox = useCallback(async () => {
+    try {
+      const res = await fetch("/api/inbox");
+      const data = (await res.json()) as { transactions?: TransactionRow[] };
+      setInbox(data.transactions ?? []);
+    } catch (e) {
+      console.error("Failed to load inbox:", e);
     }
-  }, [isStreaming]);
-
-  const addFiles = useCallback((files: FileList | File[]) => {
-    const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
-    if (images.length === 0) return;
-    setAttachments((prev) => [...prev, ...images.map(createAttachment)]);
   }, []);
 
-  const removeAttachment = useCallback((id: string) => {
-    setAttachments((prev) => {
-      const att = prev.find((a) => a.id === id);
-      if (att) URL.revokeObjectURL(att.preview);
-      return prev.filter((a) => a.id !== id);
-    });
+  const refreshDetail = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/transactions/${id}`);
+      if (!res.ok) return;
+      setDetail((await res.json()) as TransactionDetail);
+    } catch (e) {
+      console.error("Failed to load transaction:", e);
+    }
   }, []);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.dataTransfer.types.includes("Files")) setIsDragging(true);
-  }, []);
+  useEffect(() => {
+    refreshInbox();
+  }, [refreshInbox]);
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.currentTarget === e.target) setIsDragging(false);
-  }, []);
+  // When the agent finishes a run, pick up any resolution it just wrote.
+  useEffect(() => {
+    if (wasStreaming.current && !isStreaming && selectedId) {
+      refreshDetail(selectedId);
+      refreshInbox();
+    }
+    wasStreaming.current = isStreaming;
+  }, [isStreaming, selectedId, refreshDetail, refreshInbox]);
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDragging(false);
-      if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
+  const select = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      setDetail(null);
+      clearHistory();
+      refreshDetail(id);
     },
-    [addFiles]
+    [clearHistory, refreshDetail]
   );
 
-  const handlePaste = useCallback(
-    (e: React.ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      const files: File[] = [];
-      for (const item of items) {
-        if (item.kind === "file") {
-          const file = item.getAsFile();
-          if (file) files.push(file);
+  const processWithAI = useCallback(() => {
+    if (!selectedId || isStreaming) return;
+    clearHistory();
+    sendMessage({
+      role: "user",
+      parts: [
+        {
+          type: "text",
+          text: `Xử lý riêng giao dịch ${selectedId}: gọi getTransaction("${selectedId}"), chẩn đoán nguyên nhân kèm bằng chứng, đề xuất đúng một hành động kèm độ tin cậy, rồi GỌI proposeResolution. Hoàn tất tất cả các bước.`
         }
-      }
-      if (files.length > 0) {
-        e.preventDefault();
-        addFiles(files);
+      ]
+    });
+  }, [selectedId, isStreaming, clearHistory, sendMessage]);
+
+  const decide = useCallback(
+    async (resolutionId: string, decision: "APPROVED" | "REJECTED") => {
+      setDeciding(true);
+      try {
+        await fetch(`/api/resolutions/${resolutionId}/decide`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ decision, operator_id: "operator" })
+        });
+        if (selectedId) await refreshDetail(selectedId);
+        await refreshInbox();
+      } catch (e) {
+        console.error("Failed to record decision:", e);
+      } finally {
+        setDeciding(false);
       }
     },
-    [addFiles]
+    [selectedId, refreshDetail, refreshInbox]
   );
 
-  const send = useCallback(async () => {
-    const text = input.trim();
-    if ((!text && attachments.length === 0) || isStreaming) return;
-    setInput("");
+  const sendFollowUp = useCallback(() => {
+    const text = followUp.trim();
+    if (!text || isStreaming) return;
+    setFollowUp("");
+    sendMessage({ role: "user", parts: [{ type: "text", text }] });
+  }, [followUp, isStreaming, sendMessage]);
 
-    const parts: Array<
-      | { type: "text"; text: string }
-      | { type: "file"; mediaType: string; url: string }
-    > = [];
-    if (text) parts.push({ type: "text", text });
-
-    for (const att of attachments) {
-      const dataUri = await fileToDataUri(att.file);
-      parts.push({ type: "file", mediaType: att.mediaType, url: dataUri });
-    }
-
-    for (const att of attachments) URL.revokeObjectURL(att.preview);
-    setAttachments([]);
-
-    sendMessage({ role: "user", parts });
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [input, attachments, isStreaming, sendMessage]);
+  const txn = detail?.transaction;
+  const latestResolution = detail?.resolutions[0];
+  const hasPending = latestResolution?.operator_decision === "PENDING";
 
   return (
-    <div
-      className="flex flex-col h-screen bg-kumo-elevated relative"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      {isDragging && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-kumo-elevated/80 backdrop-blur-sm border-2 border-dashed border-kumo-brand rounded-xl m-2 pointer-events-none">
-          <div className="flex flex-col items-center gap-2 text-kumo-brand">
-            <ImageIcon size={40} />
-            <Text variant="heading3" as="span">
-              Drop images here
-            </Text>
-          </div>
-        </div>
-      )}
-
+    <div className="flex flex-col h-screen bg-kumo-elevated">
       {/* Header */}
-      <header className="px-5 py-4 bg-kumo-base border-b border-kumo-line">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-semibold text-kumo-default">
-              <span className="mr-2">⛅</span>Agent Starter
-            </h1>
-            <Badge variant="secondary">
-              <ChatCircleDotsIcon size={12} weight="bold" className="mr-1" />
-              AI Chat
-            </Badge>
+      <header className="px-5 py-3 bg-kumo-base border-b border-kumo-line shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <ReceiptIcon size={20} className="text-kumo-brand" weight="fill" />
+            <h1 className="text-lg font-semibold text-kumo-default">PayPilot</h1>
+            <Badge variant="secondary">Hộp xử lý giao dịch lỗi</Badge>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
+            <span className="flex items-center gap-1.5">
               <CircleIcon
                 size={8}
                 weight="fill"
                 className={connected ? "text-kumo-success" : "text-kumo-danger"}
               />
               <Text size="xs" variant="secondary">
-                {connected ? "Connected" : "Disconnected"}
+                {connected ? "Đã kết nối" : "Mất kết nối"}
               </Text>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <BugIcon size={14} className="text-kumo-inactive" />
-              <Switch
-                checked={showDebug}
-                onCheckedChange={setShowDebug}
-                size="sm"
-                aria-label="Toggle debug mode"
-              />
-            </div>
-            <ThemeToggle />
-            <div className="relative" ref={mcpPanelRef}>
-              <Button
-                variant="secondary"
-                icon={<PlugsConnectedIcon size={16} />}
-                onClick={() => setShowMcpPanel(!showMcpPanel)}
-              >
-                MCP
-                {mcpToolCount > 0 && (
-                  <Badge variant="primary" className="ml-1.5">
-                    <WrenchIcon size={10} className="mr-0.5" />
-                    {mcpToolCount}
-                  </Badge>
-                )}
-              </Button>
-
-              {/* MCP Dropdown Panel */}
-              {showMcpPanel && (
-                <div className="absolute right-0 top-full mt-2 w-96 z-50">
-                  <Surface className="rounded-xl ring ring-kumo-line shadow-lg p-4 space-y-4">
-                    {/* Panel Header */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <PlugsConnectedIcon
-                          size={16}
-                          className="text-kumo-accent"
-                        />
-                        <Text size="sm" bold>
-                          MCP Servers
-                        </Text>
-                        {serverEntries.length > 0 && (
-                          <Badge variant="secondary">
-                            {serverEntries.length}
-                          </Badge>
-                        )}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        shape="square"
-                        aria-label="Close MCP panel"
-                        icon={<XIcon size={14} />}
-                        onClick={() => setShowMcpPanel(false)}
-                      />
-                    </div>
-
-                    {/* Add Server Form */}
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        handleAddServer();
-                      }}
-                      className="space-y-2"
-                    >
-                      <input
-                        type="text"
-                        value={mcpName}
-                        onChange={(e) => setMcpName(e.target.value)}
-                        aria-label="MCP server name"
-                        placeholder="Server name"
-                        className="w-full px-3 py-1.5 text-sm rounded-lg border border-kumo-line bg-kumo-base text-kumo-default placeholder:text-kumo-inactive focus:outline-none focus:ring-1 focus:ring-kumo-accent"
-                      />
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={mcpUrl}
-                          onChange={(e) => setMcpUrl(e.target.value)}
-                          aria-label="MCP server URL"
-                          placeholder="https://mcp.example.com"
-                          className="flex-1 px-3 py-1.5 text-sm rounded-lg border border-kumo-line bg-kumo-base text-kumo-default placeholder:text-kumo-inactive focus:outline-none focus:ring-1 focus:ring-kumo-accent font-mono"
-                        />
-                        <Button
-                          type="submit"
-                          variant="primary"
-                          size="sm"
-                          icon={<PlusIcon size={14} />}
-                          disabled={
-                            isAddingServer || !mcpName.trim() || !mcpUrl.trim()
-                          }
-                        >
-                          {isAddingServer ? "..." : "Add"}
-                        </Button>
-                      </div>
-                    </form>
-
-                    {/* Server List */}
-                    {serverEntries.length > 0 && (
-                      <div className="space-y-2 max-h-60 overflow-y-auto">
-                        {serverEntries.map(([id, server]) => (
-                          <div
-                            key={id}
-                            className="flex items-start justify-between p-2.5 rounded-lg border border-kumo-line"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-kumo-default truncate">
-                                  {server.name}
-                                </span>
-                                <Badge
-                                  variant={
-                                    server.state === "ready"
-                                      ? "primary"
-                                      : server.state === "failed"
-                                        ? "destructive"
-                                        : "secondary"
-                                  }
-                                >
-                                  {server.state}
-                                </Badge>
-                              </div>
-                              <span className="text-xs font-mono text-kumo-subtle truncate block mt-0.5">
-                                {server.server_url}
-                              </span>
-                              {server.state === "failed" && server.error && (
-                                <span className="text-xs text-red-500 block mt-0.5">
-                                  {server.error}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0 ml-2">
-                              {server.state === "authenticating" &&
-                                server.auth_url && (
-                                  <Button
-                                    variant="primary"
-                                    size="sm"
-                                    icon={<SignInIcon size={12} />}
-                                    onClick={() =>
-                                      window.open(
-                                        server.auth_url as string,
-                                        "oauth",
-                                        "width=600,height=800"
-                                      )
-                                    }
-                                  >
-                                    Auth
-                                  </Button>
-                                )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                shape="square"
-                                aria-label="Remove server"
-                                icon={<TrashIcon size={12} />}
-                                onClick={() => handleRemoveServer(id)}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Tool Summary */}
-                    {mcpToolCount > 0 && (
-                      <div className="pt-2 border-t border-kumo-line">
-                        <div className="flex items-center gap-2">
-                          <WrenchIcon size={14} className="text-kumo-subtle" />
-                          <span className="text-xs text-kumo-subtle">
-                            {mcpToolCount} tool
-                            {mcpToolCount !== 1 ? "s" : ""} available from MCP
-                            servers
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </Surface>
-                </div>
-              )}
-            </div>
+            </span>
             <Button
               variant="secondary"
-              icon={<TrashIcon size={16} />}
-              onClick={clearHistory}
-            >
-              Clear
-            </Button>
+              shape="square"
+              icon={<ArrowsClockwiseIcon size={16} />}
+              onClick={refreshInbox}
+              aria-label="Tải lại hộp xử lý"
+            />
+            <ThemeToggle />
           </div>
         </div>
       </header>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-5 py-6 space-y-5">
-          {messages.length === 0 && (
-            <Empty
-              icon={<ChatCircleDotsIcon size={32} />}
-              title="Start a conversation"
-              contents={
-                <div className="flex flex-wrap justify-center gap-2">
-                  {[
-                    "What's the weather in Paris?",
-                    "What timezone am I in?",
-                    "Calculate 5000 * 3",
-                    "Remind me in 5 minutes to take a break"
-                  ].map((prompt) => (
-                    <Button
-                      key={prompt}
-                      variant="outline"
-                      size="sm"
-                      disabled={isStreaming}
-                      onClick={() => {
-                        sendMessage({
-                          role: "user",
-                          parts: [{ type: "text", text: prompt }]
-                        });
-                      }}
-                    >
-                      {prompt}
-                    </Button>
-                  ))}
+      {/* Two-pane body */}
+      <div className="flex-1 flex min-h-0">
+        {/* Left: inbox */}
+        <aside className="w-80 shrink-0 border-r border-kumo-line overflow-y-auto bg-kumo-base">
+          <div className="px-4 py-2.5 border-b border-kumo-line">
+            <Text size="xs" variant="secondary" bold>
+              CẦN XỬ LÝ ({inbox.length})
+            </Text>
+          </div>
+          <InboxList items={inbox} selectedId={selectedId} onSelect={select} />
+        </aside>
+
+        {/* Right: detail */}
+        <main className="flex-1 overflow-y-auto">
+          {!txn ? (
+            <div className="h-full flex items-center justify-center">
+              <Empty
+                icon={<ReceiptIcon size={32} />}
+                title="Chọn một giao dịch"
+                contents={
+                  <Text size="sm" variant="secondary">
+                    Chọn một giao dịch ở bên trái để xem chi tiết và xử lý.
+                  </Text>
+                }
+              />
+            </div>
+          ) : (
+            <div className="max-w-2xl mx-auto px-6 py-6 space-y-5">
+              {/* Transaction detail */}
+              <Surface className="rounded-xl ring ring-kumo-line p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="flex items-center gap-2">
+                    <CircleIcon
+                      size={9}
+                      weight="fill"
+                      className={statusColor(txn.status)}
+                    />
+                    <span className="font-mono text-base text-kumo-default">
+                      {txn.id}
+                    </span>
+                    <Badge variant="secondary">
+                      {STATUS_LABEL[txn.status] ?? txn.status}
+                    </Badge>
+                  </span>
+                  <span className="text-lg font-semibold text-kumo-default">
+                    {vnd(txn.amount_minor, txn.currency)}
+                  </span>
                 </div>
-              }
-            />
-          )}
+                <div className="divide-y divide-kumo-line">
+                  <DetailRow label="Cửa hàng" value={txn.merchant_id} />
+                  <DetailRow label="Phương thức" value={txn.method} />
+                  {txn.failure_code && (
+                    <DetailRow
+                      label="Mã lỗi"
+                      value={<span className="font-mono">{txn.failure_code}</span>}
+                    />
+                  )}
+                  {txn.failure_reason && (
+                    <DetailRow label="Lý do" value={txn.failure_reason} />
+                  )}
+                  {txn.gateway_ref && (
+                    <DetailRow
+                      label="Mã cổng"
+                      value={<span className="font-mono">{txn.gateway_ref}</span>}
+                    />
+                  )}
+                </div>
+              </Surface>
 
-          {messages.map((message: UIMessage, index: number) => {
-            const isUser = message.role === "user";
-            const isLastAssistant =
-              message.role === "assistant" && index === messages.length - 1;
-
-            return (
-              <div key={message.id} className="space-y-2">
-                {showDebug && (
-                  <pre className="text-[11px] text-kumo-subtle bg-kumo-control rounded-lg p-3 overflow-auto max-h-64">
-                    {JSON.stringify(message, null, 2)}
-                  </pre>
-                )}
-
-                {/* Tool parts */}
-                {message.parts.filter(isToolUIPart).map((part) => (
-                  <ToolPartView
-                    key={part.toolCallId}
-                    part={part}
-                    addToolApprovalResponse={addToolApprovalResponse}
-                  />
-                ))}
-
-                {/* Reasoning parts */}
-                {message.parts
-                  .filter(
-                    (part) =>
-                      part.type === "reasoning" &&
-                      (part as { text?: string }).text?.trim()
-                  )
-                  .map((part, i) => {
-                    const reasoning = part as {
-                      type: "reasoning";
-                      text: string;
-                      state?: "streaming" | "done";
-                    };
-                    const isDone = reasoning.state === "done" || !isStreaming;
-                    return (
-                      <div key={i} className="flex justify-start">
-                        <details className="max-w-[85%] w-full" open={!isDone}>
-                          <summary className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg bg-purple-500/10 border border-purple-500/20 text-sm select-none">
-                            <BrainIcon size={14} className="text-purple-400" />
-                            <span className="font-medium text-kumo-default">
-                              Reasoning
-                            </span>
-                            {isDone ? (
-                              <span className="text-xs text-kumo-success">
-                                Complete
-                              </span>
-                            ) : (
-                              <span className="text-xs text-kumo-brand">
-                                Thinking...
-                              </span>
-                            )}
-                            <CaretDownIcon
-                              size={14}
-                              className="ml-auto text-kumo-inactive"
-                            />
-                          </summary>
-                          <pre className="mt-2 px-3 py-2 rounded-lg bg-kumo-control text-xs text-kumo-default whitespace-pre-wrap overflow-auto max-h-64">
-                            {reasoning.text}
-                          </pre>
-                        </details>
-                      </div>
-                    );
-                  })}
-
-                {/* Image parts */}
-                {message.parts
-                  .filter(
-                    (part): part is Extract<typeof part, { type: "file" }> =>
-                      part.type === "file" &&
-                      (part as { mediaType?: string }).mediaType?.startsWith(
-                        "image/"
-                      ) === true
-                  )
-                  .map((part, i) => (
-                    <div
-                      key={`file-${i}`}
-                      className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-                    >
-                      <img
-                        src={part.url}
-                        alt="Attachment"
-                        className="max-h-64 rounded-xl border border-kumo-line object-contain"
-                      />
-                    </div>
-                  ))}
-
-                {/* Text parts */}
-                {message.parts
-                  .filter((part) => part.type === "text")
-                  .map((part, i) => {
-                    const text = (part as { type: "text"; text: string }).text;
-                    if (!text) return null;
-
-                    if (isUser) {
-                      return (
-                        <div key={i} className="flex justify-end">
-                          <div className="max-w-[85%] px-4 py-2.5 rounded-2xl rounded-br-md bg-kumo-contrast text-kumo-inverse leading-relaxed">
-                            {text}
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div key={i} className="flex justify-start">
-                        <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-kumo-base text-kumo-default leading-relaxed">
-                          <Streamdown
-                            className="sd-theme rounded-2xl rounded-bl-md p-3"
-                            plugins={{ code }}
-                            controls={false}
-                            isAnimating={isLastAssistant && isStreaming}
-                          >
-                            {text}
-                          </Streamdown>
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            );
-          })}
-
-          <div ref={messagesEndRef} />
-        </div>
-      </div>
-
-      {/* Input */}
-      <div className="border-t border-kumo-line bg-kumo-base">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            send();
-          }}
-          className="max-w-3xl mx-auto px-5 py-4"
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept="image/*"
-            aria-label="Upload image attachments"
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files) addFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-
-          {attachments.length > 0 && (
-            <div className="flex gap-2 mb-2 flex-wrap">
-              {attachments.map((att) => (
-                <div
-                  key={att.id}
-                  className="relative group rounded-lg border border-kumo-line bg-kumo-control overflow-hidden"
-                >
-                  <img
-                    src={att.preview}
-                    alt={att.file.name}
-                    className="h-16 w-16 object-cover"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeAttachment(att.id)}
-                    className="absolute top-0.5 right-0.5 rounded-full bg-kumo-contrast/80 text-kumo-inverse p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                    aria-label={`Remove ${att.file.name}`}
+              {/* Resolution / action */}
+              {latestResolution ? (
+                <ResolutionCard
+                  resolution={latestResolution}
+                  onDecide={decide}
+                  deciding={deciding}
+                />
+              ) : (
+                <Surface className="rounded-xl ring ring-kumo-line p-4 flex items-center justify-between">
+                  <Text size="sm" variant="secondary">
+                    Chưa có đề xuất. Để AI phân tích và đề xuất hướng xử lý.
+                  </Text>
+                  <Button
+                    variant="primary"
+                    icon={<SparkleIcon size={15} />}
+                    onClick={processWithAI}
+                    disabled={isStreaming || !connected}
                   >
-                    <XIcon size={10} />
-                  </button>
+                    Xử lý bằng AI
+                  </Button>
+                </Surface>
+              )}
+
+              {/* Agent activity */}
+              {(messages.length > 0 || isStreaming) && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Text size="xs" variant="secondary" bold>
+                      AI ĐANG XỬ LÝ
+                    </Text>
+                    {isStreaming && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<StopIcon size={13} />}
+                        onClick={stop}
+                      >
+                        Dừng
+                      </Button>
+                    )}
+                  </div>
+                  <AgentActivity messages={messages} isStreaming={isStreaming} />
+
+                  {/* Follow-up question to the agent */}
+                  <div className="flex items-end gap-2 rounded-xl border border-kumo-line bg-kumo-base p-2">
+                    <InputArea
+                      value={followUp}
+                      onValueChange={setFollowUp}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          sendFollowUp();
+                        }
+                      }}
+                      placeholder="Hỏi thêm AI về giao dịch này…"
+                      disabled={!connected || isStreaming}
+                      rows={1}
+                      className="flex-1 ring-0! focus:ring-0! shadow-none! bg-transparent! resize-none max-h-32"
+                    />
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={sendFollowUp}
+                      disabled={!followUp.trim() || isStreaming || !connected}
+                    >
+                      Gửi
+                    </Button>
+                  </div>
                 </div>
-              ))}
+              )}
+
+              {/* Warning if AI couldn't propose (e.g. duplicate pending) */}
+              {!latestResolution && !isStreaming && messages.length > 0 && (
+                <div className="flex items-center gap-2 text-xs text-amber-500">
+                  <WarningIcon size={14} />
+                  Nếu AI dừng sớm, bấm "Xử lý bằng AI" lại hoặc hỏi thêm ở trên.
+                </div>
+              )}
             </div>
           )}
-
-          <div className="flex items-end gap-3 rounded-xl border border-kumo-line bg-kumo-base p-3 shadow-sm focus-within:ring-2 focus-within:ring-kumo-ring focus-within:border-transparent transition-shadow">
-            <Button
-              type="button"
-              variant="ghost"
-              shape="square"
-              aria-label="Attach images"
-              icon={<PaperclipIcon size={18} />}
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!connected || isStreaming}
-              className="mb-0.5"
-            />
-            <InputArea
-              ref={textareaRef}
-              value={input}
-              onValueChange={setInput}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              onInput={(e) => {
-                const el = e.currentTarget;
-                el.style.height = "auto";
-                el.style.height = `${el.scrollHeight}px`;
-              }}
-              onPaste={handlePaste}
-              placeholder={
-                attachments.length > 0
-                  ? "Add a message or send images..."
-                  : "Send a message..."
-              }
-              disabled={!connected || isStreaming}
-              rows={1}
-              className="flex-1 ring-0! focus:ring-0! shadow-none! bg-transparent! outline-none! resize-none max-h-40"
-            />
-            {isStreaming ? (
-              <Button
-                type="button"
-                variant="secondary"
-                shape="square"
-                aria-label="Stop generation"
-                icon={<StopIcon size={18} />}
-                onClick={stop}
-                className="mb-0.5"
-              />
-            ) : (
-              <Button
-                type="submit"
-                variant="primary"
-                shape="square"
-                aria-label="Send message"
-                disabled={
-                  (!input.trim() && attachments.length === 0) || !connected
-                }
-                icon={<PaperPlaneRightIcon size={18} />}
-                className="mb-0.5"
-              />
-            )}
-          </div>
-        </form>
+        </main>
       </div>
     </div>
   );
@@ -935,16 +667,14 @@ function Chat() {
 
 export default function App() {
   return (
-    <Toasty>
-      <Suspense
-        fallback={
-          <div className="flex items-center justify-center h-screen text-kumo-inactive">
-            Loading...
-          </div>
-        }
-      >
-        <Chat />
-      </Suspense>
-    </Toasty>
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center h-screen text-kumo-inactive">
+          Đang tải…
+        </div>
+      }
+    >
+      <PayPilot />
+    </Suspense>
   );
 }
