@@ -1,0 +1,48 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "paypilot",
+  "main": "src/server.ts",
+  "compatibility_date": "2026-03-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  },
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "single-page-application",
+    // Worker handles these before the SPA fallback: the agent protocol,
+    // MCP OAuth, and PayPilot's own JSON API for the inbox UI.
+    "run_worker_first": ["/agents/*", "/oauth/*", "/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "TriageAgent",
+        "name": "TriageAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["TriageAgent"],
+      "tag": "v1"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "upload_source_maps": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "paypilot-db",
+      "database_id": "6c533bc9-e243-4238-a74f-fff563d918fb",
+      "remote": true
+    }
+  ]
+}

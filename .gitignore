@@ -29,3 +29,7 @@ wrangler.toml.bak
 .DS_Store
 .vscode/
 .idea/
+
+# Local test artifacts (Playwright browser snapshots/screenshots)
+.playwright-mcp/
+*-flow.png
