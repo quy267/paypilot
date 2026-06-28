@@ -1,6 +1,11 @@
 {
   "extends": "agents/tsconfig",
   "compilerOptions": {
-    // add your overrides here
+    // Path alias so shadcn's "@/..." imports resolve to ./src/... .
+    // No baseUrl (deprecated in TS 6): since TS 5.4, `paths` resolves relative
+    // to this tsconfig's own directory, which is what we want.
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   }
 }
