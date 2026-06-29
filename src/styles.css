@@ -1,72 +1,82 @@
 @import "tailwindcss";
-@import "@cloudflare/kumo/styles/tailwind";
 @import "tw-animate-css";
 
-@source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+/* streamdown renders the agent's markdown answer; keep its class sources */
 @source "../node_modules/streamdown/dist/*.js";
 @source "../node_modules/@streamdown/code/dist/*.js";
 
-/* ── shadcn/ui theme (Tailwind v4, CSS-first) ──────────────────────────────
-   Stage B foundation: define the token set + map it to Tailwind color utilities
-   so shadcn components have a theme to read in Stage C. These tokens are
-   ADDITIVE — nothing renders them yet, so the current Kumo UI is unchanged.
-   Dark mode reuses the app's existing mechanism (the data-mode="dark" attribute
-   on <html>) instead of shadcn's default `.dark` class, so ThemeToggle keeps
-   working. The global `@layer base` reset (border-border / bg-background) is
-   intentionally deferred to Stage C to avoid touching the Kumo look now.
-   Baseline = shadcn "slate"; exact values get replaced by the design palette. */
+/* Dark mode follows the app's existing mechanism: the data-mode="dark" attribute
+   on <html> (set by ThemeToggle), NOT shadcn's default .dark class. */
 @custom-variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
 
+/* ── PayPilot design tokens (from claude.ai/design: PayPilot.dc.html) ───────── */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.13 0.028 261.692);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.13 0.028 261.692);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.13 0.028 261.692);
-  --primary: oklch(0.21 0.034 264.665);
-  --primary-foreground: oklch(0.985 0.002 247.839);
-  --secondary: oklch(0.967 0.003 264.542);
-  --secondary-foreground: oklch(0.21 0.034 264.665);
-  --muted: oklch(0.967 0.003 264.542);
-  --muted-foreground: oklch(0.551 0.027 264.364);
-  --accent: oklch(0.967 0.003 264.542);
-  --accent-foreground: oklch(0.21 0.034 264.665);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0.002 247.839);
-  --border: oklch(0.928 0.006 264.531);
-  --input: oklch(0.928 0.006 264.531);
-  --ring: oklch(0.707 0.022 261.325);
+  --radius: 0.75rem;
+  --sans: "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --background: #f6f8fc;
+  --foreground: #101a2e;
+  --card: #ffffff;
+  --card-foreground: #101a2e;
+  --popover: #ffffff;
+  --popover-foreground: #101a2e;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --secondary: #eef2fb;
+  --secondary-foreground: #3a4760;
+  --muted: #eef2fb;
+  --muted-foreground: #647088;
+  --accent: #eaeefb;
+  --accent-foreground: #101a2e;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e5e9f5;
+  --input: #e5e9f5;
+  --ring: #4f46e5;
+
+  --shadow-card: 0 1px 2px 0 rgb(16 24 40 / 0.04), 0 2px 8px -2px rgb(16 24 40 / 0.08);
+
+  /* Status tones: amber=FLAGGED, red=FAILED, blue=PENDING, green=SUCCESS, neutral=default */
+  --t-amber-dot: #f59e0b; --t-amber-bg: #fffbeb; --t-amber-fg: #b45309; --t-amber-bd: #fde68a;
+  --t-red-dot:   #ef4444; --t-red-bg:   #fef2f2; --t-red-fg:   #b91c1c; --t-red-bd:   #fecaca;
+  --t-blue-dot:  #3b82f6; --t-blue-bg:  #eff6ff; --t-blue-fg:  #1d4ed8; --t-blue-bd:  #bfdbfe;
+  --t-green-dot: #22c55e; --t-green-bg: #f0fdf4; --t-green-fg: #15803d; --t-green-bd: #bbf7d0;
+  --t-neutral-dot: #64748b; --t-neutral-bg: #f1f5f9; --t-neutral-fg: #475569; --t-neutral-bd: #e2e8f0;
 }
 
 [data-mode="dark"] {
-  --background: oklch(0.13 0.028 261.692);
-  --foreground: oklch(0.985 0.002 247.839);
-  --card: oklch(0.21 0.034 264.665);
-  --card-foreground: oklch(0.985 0.002 247.839);
-  --popover: oklch(0.21 0.034 264.665);
-  --popover-foreground: oklch(0.985 0.002 247.839);
-  --primary: oklch(0.928 0.006 264.531);
-  --primary-foreground: oklch(0.21 0.034 264.665);
-  --secondary: oklch(0.278 0.033 256.848);
-  --secondary-foreground: oklch(0.985 0.002 247.839);
-  --muted: oklch(0.278 0.033 256.848);
-  --muted-foreground: oklch(0.707 0.022 261.325);
-  --accent: oklch(0.278 0.033 256.848);
-  --accent-foreground: oklch(0.985 0.002 247.839);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0.002 247.839);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.551 0.027 264.364);
+  --background: #0e1626;
+  --foreground: #eef2fb;
+  --card: #19233b;
+  --card-foreground: #eef2fb;
+  --popover: #19233b;
+  --popover-foreground: #eef2fb;
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --secondary: #253250;
+  --secondary-foreground: #dbe3f2;
+  --muted: #253250;
+  --muted-foreground: #a2b1cc;
+  --accent: #273552;
+  --accent-foreground: #f1f5f9;
+  --destructive: #f87171;
+  --destructive-foreground: #1a0a0a;
+  --border: #2c3b59;
+  --input: #2c3b59;
+  --ring: #6366f1;
+
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.4);
+
+  --t-amber-dot: #fbbf24; --t-amber-bg: rgb(245 158 11 / 0.13); --t-amber-fg: #fcd34d; --t-amber-bd: rgb(245 158 11 / 0.30);
+  --t-red-dot:   #f87171; --t-red-bg:   rgb(239 68 68 / 0.13);  --t-red-fg:   #fca5a5; --t-red-bd:   rgb(239 68 68 / 0.30);
+  --t-blue-dot:  #60a5fa; --t-blue-bg:  rgb(59 130 246 / 0.13); --t-blue-fg:  #93c5fd; --t-blue-bd:  rgb(59 130 246 / 0.30);
+  --t-green-dot: #4ade80; --t-green-bg: rgb(34 197 94 / 0.13);  --t-green-fg: #86efac; --t-green-bd: rgb(34 197 94 / 0.30);
+  --t-neutral-dot: #94a3b8; --t-neutral-bg: #1e293b; --t-neutral-fg: #94a3b8; --t-neutral-bd: #334155;
 }
 
+/* Map tokens to Tailwind utilities (bg-background, text-foreground, font-sans, shadow-card, …) */
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -86,6 +96,40 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-card: var(--shadow-card);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--sans);
+  }
+}
+
+/* Status pill + dot tones, driven by the --t-* tokens above (auto light/dark) */
+@layer components {
+  .tone-amber   { background: var(--t-amber-bg);   color: var(--t-amber-fg);   border-color: var(--t-amber-bd); }
+  .tone-red     { background: var(--t-red-bg);     color: var(--t-red-fg);     border-color: var(--t-red-bd); }
+  .tone-blue    { background: var(--t-blue-bg);    color: var(--t-blue-fg);    border-color: var(--t-blue-bd); }
+  .tone-green   { background: var(--t-green-bg);   color: var(--t-green-fg);   border-color: var(--t-green-bd); }
+  .tone-neutral { background: var(--t-neutral-bg); color: var(--t-neutral-fg); border-color: var(--t-neutral-bd); }
+  .dot-amber   { background: var(--t-amber-dot); }
+  .dot-red     { background: var(--t-red-dot); }
+  .dot-blue    { background: var(--t-blue-dot); }
+  .dot-green   { background: var(--t-green-dot); }
+  .dot-neutral { background: var(--t-neutral-dot); }
 }
 
 html,
