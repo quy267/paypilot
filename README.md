@@ -62,6 +62,25 @@ sqlite3 /tmp/paypilot.db ".read schema.sql" ".read seed.sql" \
   "SELECT status, COUNT(*) FROM transactions GROUP BY status;"
 ```
 
+## Đánh giá AI
+
+Bộ đánh giá đo độ chính xác của model khi triage ≥ 10 tình huống dựa trên dữ liệu mẫu. Nó chạy **ngoài** Durable Object/WebSocket: dựng một D1 trong bộ nhớ (miniflare) từ `schema.sql` + `seed.sql`, rồi gọi đúng system prompt + bộ công cụ mà agent thật dùng (định nghĩa dùng chung trong `src/agent/triage-core.ts`).
+
+```bash
+npm run eval
+```
+
+Cần 2 dòng trong `.dev.vars` (đã git-ignore, không commit):
+
+```
+CLOUDFLARE_ACCOUNT_ID=<account id — lấy bằng: wrangler whoami>
+CLOUDFLARE_API_TOKEN=<token quyền Workers AI Read>
+```
+
+Token: Cloudflare dashboard → My Profile → API Tokens → Create Token → quyền **Workers AI: Read** (phạm vi Account).
+
+Mỗi tình huống đo: có gọi `proposeResolution` không, đúng giao dịch không, hành động (`RETRY`/`ESCALATE`/`REFUND`) có nằm trong tập kỳ vọng không, có chain tool (`getTransaction` → `proposeResolution`) không, và luật `REFUND` chỉ cho `FLAGGED` có được tôn trọng không. In ra % chính xác. *(Model thật nên % có thể dao động nhẹ giữa các lần chạy.)*
+
 ## Trạng thái
 
 Đang đăng ký khóa **Agentic Vibe Coding**. Repo này hiện chứa schema + dữ liệu mẫu + bản mô tả yêu cầu; phần code MVP sẽ được xây trong khóa (sau khi mentor chốt công nghệ).

@@ -17,7 +17,8 @@
     "types": "wrangler types env.d.ts --include-runtime false",
     "format": "oxfmt --write .",
     "lint": "oxlint src/",
-    "check": "oxfmt --check . && oxlint src/ && tsc"
+    "check": "oxfmt --check . && oxlint src/ && tsc",
+    "eval": "tsx eval/run-eval.ts"
   },
   "dependencies": {
     "@cloudflare/ai-chat": "^0.8.0",
@@ -51,6 +52,7 @@
     "oxfmt": "^0.53.0",
     "oxlint": "^1.68.0",
     "tailwindcss": "^4.3.0",
+    "tsx": "^4.23.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "wrangler": "^4.105.0"
