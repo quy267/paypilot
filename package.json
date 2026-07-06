@@ -49,6 +49,7 @@
     "@types/react": "^19.2.16",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
+    "miniflare": "^4.20260529.0",
     "oxfmt": "^0.53.0",
     "oxlint": "^1.68.0",
     "tailwindcss": "^4.3.0",

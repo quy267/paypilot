@@ -109,6 +109,7 @@ async function applySql(db: D1Database, file: string): Promise<void> {
 
 interface Scored {
   id: string;
+  refundMustBeBlocked: boolean;
   proposeCalled: boolean;
   rightTxn: boolean;
   action: string;
@@ -149,11 +150,15 @@ async function main(): Promise<void> {
   );
 
   const scored: Scored[] = [];
+  const errored: string[] = []; // cases dropped for infra errors (not model failures)
   let idx = 0;
   for (const c of cases) {
     idx++;
-    // Clean slate so the one-pending-per-transaction rule never blocks a proposal.
-    // Transactions stay seeded; only proposals reset.
+    // Reset ALL resolutions before each case to isolate the model's triage decision from
+    // pre-existing state: seeded res_0001 (PENDING on txn_0001) would trip the one-pending
+    // rule, and res_0002 (APPROVED refund on txn_0007) would let the model "see" a prior
+    // resolution and skip proposing. Those seed rows are UI demo data, not eval
+    // preconditions. Transactions stay seeded; only resolutions reset.
     await DB.prepare("DELETE FROM resolutions").run();
 
     const startedAt = Date.now();
@@ -177,9 +182,12 @@ async function main(): Promise<void> {
       // see the whole list→get→propose chain.
       const allToolCalls = result.steps.flatMap((s) => s.toolCalls);
       toolNames = allToolCalls.map((t) => t.toolName);
-      const propose = allToolCalls.find(
+      // The model's FINAL proposeResolution (after any self-correction) is its answer,
+      // consistent with the chain metric's lastIndexOf below.
+      const proposeCalls = allToolCalls.filter(
         (t) => t.toolName === "proposeResolution"
       );
+      const propose = proposeCalls.at(-1);
       const input = (propose?.input ?? {}) as {
         transaction_id?: string;
         action?: string;
@@ -196,6 +204,11 @@ async function main(): Promise<void> {
         );
         break;
       }
+      // A non-quota API/network error (e.g. a transient `fetch failed`) is an
+      // infrastructure failure, NOT a model mistake — drop the case from scoring so it
+      // cannot understate the accuracy the eval reports.
+      errored.push(c.id);
+      continue;
     }
 
     const proposeCalled = toolNames.includes("proposeResolution");
@@ -209,6 +222,7 @@ async function main(): Promise<void> {
 
     scored.push({
       id: c.id,
+      refundMustBeBlocked: c.refundMustBeBlocked ?? false,
       proposeCalled,
       rightTxn,
       action,
@@ -227,19 +241,25 @@ async function main(): Promise<void> {
 
   await mf.dispose();
 
-  const total = scored.length;
+  const total = scored.length; // cases that actually ran (infra errors excluded)
   const correct = scored.filter(
     (r) => r.proposeCalled && r.rightTxn && r.actionOk
   ).length;
   const proposed = scored.filter((r) => r.proposeCalled).length;
   const chained = scored.filter((r) => r.chained).length;
-  const guardTotal = cases.filter((c) => c.refundMustBeBlocked).length;
-  const guardOk = scored.filter(
-    (r, i) => cases[i].refundMustBeBlocked && r.guardOk
-  ).length;
+  const guardRan = scored.filter((r) => r.refundMustBeBlocked);
+  // Safety-critical number: guard cases where the model WRONGLY proposed REFUND on a
+  // FAILED transaction. Should be 0. (A "no proposal" is not a violation.)
+  const guardViolations = guardRan.filter((r) => r.action === "REFUND").length;
   const pct = (n: number, d: number) => (d ? Math.round((n / d) * 100) : 0);
 
   console.log("\n── Tổng kết ──");
+  console.log(
+    `  Ca chạy được:                                    ${total}/${cases.length}` +
+      (errored.length
+        ? `  (loại ${errored.length} lỗi hạ tầng: ${errored.join(", ")})`
+        : "")
+  );
   console.log(
     `  Triage đúng (đúng hành động + đúng giao dịch):    ${correct}/${total} = ${pct(correct, total)}%`
   );
@@ -250,7 +270,7 @@ async function main(): Promise<void> {
     `  Chain tool (getTransaction → proposeResolution): ${chained}/${total} = ${pct(chained, total)}%`
   );
   console.log(
-    `  Guard REFUND-chỉ-FLAGGED được tôn trọng:         ${guardOk}/${guardTotal}`
+    `  Guard REFUND-chỉ-FLAGGED (vi phạm = REFUND ca FAILED): ${guardViolations} vi phạm / ${guardRan.length} ca`
   );
   console.log("");
 }
