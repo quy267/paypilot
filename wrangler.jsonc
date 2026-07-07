@@ -15,9 +15,9 @@
   "assets": {
     "directory": "./public",
     "not_found_handling": "single-page-application",
-    // Worker handles these before the SPA fallback: the agent protocol,
-    // MCP OAuth, and PayPilot's own JSON API for the inbox UI.
-    "run_worker_first": ["/agents/*", "/oauth/*", "/api/*"]
+    // Worker handles these before the SPA fallback: the agent protocol
+    // and PayPilot's own JSON API for the inbox UI.
+    "run_worker_first": ["/agents/*", "/api/*"]
   },
   "durable_objects": {
     "bindings": [

@@ -77,7 +77,7 @@ export function AgentActivity({
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-          AI đang xử lý
+          {isStreaming ? "AI đang xử lý" : "Phân tích của AI"}
         </span>
         {isStreaming && (
           <Button variant="outline" size="sm" onClick={onStop}>

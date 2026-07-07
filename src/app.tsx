@@ -1,12 +1,19 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
-import { Compass, RefreshCw, Sparkles, TriangleAlert } from "lucide-react";
+import {
+  Compass,
+  LogOut,
+  RefreshCw,
+  Sparkles,
+  TriangleAlert
+} from "lucide-react";
 import type { TriageAgent } from "./server";
 import type { ResolutionRow, TransactionRow } from "@/services/triage";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LoginScreen } from "@/components/login-screen";
 import { InboxList } from "@/components/inbox-list";
 import { TransactionDetail } from "@/components/transaction-detail";
 import { ResolutionCard } from "@/components/resolution-card";
@@ -18,7 +25,11 @@ interface TransactionDetailData {
   resolutions: ResolutionRow[];
 }
 
-function PayPilot() {
+interface PayPilotProps {
+  onLogout: () => void;
+}
+
+function PayPilot({ onLogout }: PayPilotProps) {
   const [connected, setConnected] = useState(false);
   const [inbox, setInbox] = useState<TransactionRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -28,6 +39,12 @@ function PayPilot() {
   const wasStreaming = useRef(false);
   // Guards against a slow /api/transactions response overwriting a newer selection.
   const latestDetailReq = useRef<string | null>(null);
+  // The chat library's streaming `status` can get stuck after a run finishes, so we
+  // can't rely on it to know a triage is done. `triaging` is our own "AI run in
+  // progress" flag that drives the UI, and `activeTriageId` records which
+  // transaction the run belongs to so a poll for a stale selection bails out.
+  const [triaging, setTriaging] = useState(false);
+  const activeTriageId = useRef<string | null>(null);
 
   const agent = useAgent<TriageAgent>({
     agent: "TriageAgent",
@@ -79,6 +96,9 @@ function PayPilot() {
 
   const select = useCallback(
     (id: string) => {
+      // Cancel any in-flight triage poll tied to the previously selected txn.
+      activeTriageId.current = null;
+      setTriaging(false);
       setSelectedId(id);
       setDetail(null);
       clearHistory();
@@ -87,8 +107,11 @@ function PayPilot() {
     [clearHistory, refreshDetail]
   );
 
-  const processWithAI = useCallback(() => {
-    if (!selectedId || isStreaming) return;
+  const processWithAI = useCallback(async () => {
+    if (!selectedId || triaging) return;
+    const id = selectedId;
+    activeTriageId.current = id;
+    setTriaging(true);
     clearHistory();
     // Forceful, step-numbered prompt: the free Kimi model only chains tools reliably this way.
     sendMessage({
@@ -96,11 +119,33 @@ function PayPilot() {
       parts: [
         {
           type: "text",
-          text: `Xử lý riêng giao dịch ${selectedId}: gọi getTransaction("${selectedId}"), chẩn đoán nguyên nhân kèm bằng chứng, đề xuất đúng một hành động kèm độ tin cậy, rồi GỌI proposeResolution. Hoàn tất tất cả các bước.`,
+          text: `Xử lý riêng giao dịch ${id}: gọi getTransaction("${id}"), chẩn đoán nguyên nhân kèm bằng chứng, đề xuất đúng một hành động kèm độ tin cậy, rồi GỌI proposeResolution. Hoàn tất tất cả các bước.`,
         },
       ],
     });
-  }, [selectedId, isStreaming, clearHistory, sendMessage]);
+    // The agent writes its resolution to D1 even when the chat stream never signals
+    // completion to the client, so poll the detail endpoint directly until the
+    // resolution shows up (or we give up). This is what makes the card appear.
+    try {
+      for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        if (activeTriageId.current !== id) return; // user switched away / new run
+        const res = await fetch(`/api/transactions/${id}`);
+        if (!res.ok) continue;
+        const data = (await res.json()) as TransactionDetailData;
+        if (activeTriageId.current !== id) return;
+        if (data.resolutions.length > 0) {
+          setDetail(data);
+          break;
+        }
+      }
+    } catch (e) {
+      console.error("Failed while waiting for AI resolution:", e);
+    } finally {
+      if (activeTriageId.current === id) setTriaging(false);
+      refreshInbox();
+    }
+  }, [selectedId, triaging, clearHistory, sendMessage, refreshInbox]);
 
   const decide = useCallback(
     async (
@@ -113,7 +158,7 @@ function PayPilot() {
         await fetch(`/api/resolutions/${resolutionId}/decide`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ decision, operator_id: "operator", note }),
+          body: JSON.stringify({ decision, note }),
         });
         if (selectedId) await refreshDetail(selectedId);
         await refreshInbox();
@@ -128,10 +173,10 @@ function PayPilot() {
 
   const sendFollowUp = useCallback(() => {
     const text = followUp.trim();
-    if (!text || isStreaming) return;
+    if (!text || triaging) return;
     setFollowUp("");
     sendMessage({ role: "user", parts: [{ type: "text", text }] });
-  }, [followUp, isStreaming, sendMessage]);
+  }, [followUp, triaging, sendMessage]);
 
   const txn = detail?.transaction;
   const latestResolution = detail?.resolutions[0];
@@ -170,6 +215,9 @@ function PayPilot() {
             <RefreshCw />
           </Button>
           <ThemeToggle />
+          <Button variant="ghost" size="sm" onClick={onLogout}>
+            <LogOut /> Đăng xuất
+          </Button>
         </div>
       </header>
 
@@ -211,7 +259,7 @@ function PayPilot() {
                   </p>
                   <Button
                     onClick={processWithAI}
-                    disabled={isStreaming || !connected}
+                    disabled={triaging || !connected}
                     className="shrink-0"
                   >
                     <Sparkles /> Xử lý bằng AI
@@ -221,7 +269,7 @@ function PayPilot() {
 
               <AgentActivity
                 messages={messages}
-                isStreaming={isStreaming}
+                isStreaming={triaging}
                 onStop={stop}
                 followUp={followUp}
                 onFollowUpChange={setFollowUp}
@@ -230,7 +278,7 @@ function PayPilot() {
               />
 
               {/* Warn if the AI stopped without proposing (e.g. a duplicate pending) */}
-              {!latestResolution && !isStreaming && messages.length > 0 && (
+              {!latestResolution && !triaging && messages.length > 0 && (
                 <div className="flex items-center gap-2 text-xs text-[var(--t-amber-fg)]">
                   <TriangleAlert className="size-3.5" />
                   Nếu AI dừng sớm, bấm "Xử lý bằng AI" lại hoặc hỏi thêm ở trên.
@@ -244,7 +292,54 @@ function PayPilot() {
   );
 }
 
+type AuthState = "checking" | "authed" | "guest";
+
 export default function App() {
+  const [authState, setAuthState] = useState<AuthState>("checking");
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadMe = async () => {
+      try {
+        const res = await fetch("/api/me");
+        if (!cancelled) setAuthState(res.ok ? "authed" : "guest");
+      } catch (e) {
+        console.error("Failed to check auth:", e);
+        if (!cancelled) setAuthState("guest");
+      }
+    };
+    loadMe();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleAuthed = useCallback(() => {
+    setAuthState("authed");
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await fetch("/api/logout", { method: "POST" });
+    } catch (e) {
+      console.error("Failed to log out:", e);
+    } finally {
+      setAuthState("guest");
+    }
+  }, []);
+
+  if (authState === "checking") {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background text-muted-foreground">
+        Đang tải…
+      </div>
+    );
+  }
+
+  if (authState === "guest") {
+    return <LoginScreen onAuthed={handleAuthed} />;
+  }
+
   return (
     <Suspense
       fallback={
@@ -253,7 +348,7 @@ export default function App() {
         </div>
       }
     >
-      <PayPilot />
+      <PayPilot onLogout={handleLogout} />
     </Suspense>
   );
 }

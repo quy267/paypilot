@@ -1,5 +1,5 @@
 import { createWorkersAI } from "workers-ai-provider";
-import { callable, routeAgentRequest } from "agents";
+import { routeAgentRequest } from "agents";
 import { AIChatAgent, type OnChatMessageOptions } from "@cloudflare/ai-chat";
 import { convertToModelMessages, pruneMessages, streamText } from "ai";
 import {
@@ -18,34 +18,6 @@ import {
 
 export class TriageAgent extends AIChatAgent<Env> {
   maxPersistedMessages = 100;
-
-  onStart() {
-    // Configure OAuth popup behavior for MCP servers that require authentication
-    this.mcp.configureOAuthCallback({
-      customHandler: (result) => {
-        if (result.authSuccess) {
-          return new Response("<script>window.close();</script>", {
-            headers: { "content-type": "text/html" },
-            status: 200
-          });
-        }
-        return new Response(
-          `Authentication Failed: ${result.authError || "Unknown error"}`,
-          { headers: { "content-type": "text/plain" }, status: 400 }
-        );
-      }
-    });
-  }
-
-  @callable()
-  async addServer(name: string, url: string) {
-    return await this.addMcpServer(name, url);
-  }
-
-  @callable()
-  async removeServer(serverId: string) {
-    await this.removeMcpServer(serverId);
-  }
 
   async onChatMessage(_onFinish: unknown, options?: OnChatMessageOptions) {
     const mcpTools = this.mcp.getAITools();
@@ -76,6 +48,96 @@ export class TriageAgent extends AIChatAgent<Env> {
   }
 }
 
+const SESSION_COOKIE = "__Host-pp_session";
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+const textEncoder = new TextEncoder();
+
+function hex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+async function hmacHex(secret: string, value: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    textEncoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  return hex(await crypto.subtle.sign("HMAC", key, textEncoder.encode(value)));
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  return hex(await crypto.subtle.digest("SHA-256", textEncoder.encode(value)));
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+function getCookie(request: Request, name: string): string | null {
+  const cookieHeader = request.headers.get("Cookie");
+  if (!cookieHeader) return null;
+  for (const part of cookieHeader.split(";")) {
+    const equalsAt = part.indexOf("=");
+    if (equalsAt === -1) continue;
+    const cookieName = part.slice(0, equalsAt).trim();
+    if (cookieName === name) return part.slice(equalsAt + 1).trim();
+  }
+  return null;
+}
+
+async function sessionToken(env: Env): Promise<string> {
+  const exp = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS;
+  const expString = String(exp);
+  return `${expString}.${await hmacHex(env.OWNER_KEY, expString)}`;
+}
+
+async function isAuthed(request: Request, env: Env): Promise<boolean> {
+  const token = getCookie(request, SESSION_COOKIE);
+  if (!token) return false;
+
+  const dotAt = token.indexOf(".");
+  if (dotAt <= 0 || dotAt === token.length - 1) return false;
+
+  const expString = token.slice(0, dotAt);
+  const cookieHmac = token.slice(dotAt + 1);
+  if (!/^\d+$/.test(expString)) return false;
+
+  const exp = Number(expString);
+  if (!Number.isSafeInteger(exp) || exp <= Math.floor(Date.now() / 1000)) {
+    return false;
+  }
+
+  const expectedHmac = await hmacHex(env.OWNER_KEY, expString);
+  return constantTimeEqual(expectedHmac, cookieHmac);
+}
+
+function sameOrigin(request: Request): boolean {
+  const origin = request.headers.get("Origin");
+  // Only state-changing POSTs and the WS upgrade call this, and browsers always send
+  // Origin on those. A missing Origin therefore means a non-browser/forged request — reject.
+  if (!origin) return false;
+  const url = new URL(request.url);
+  return origin === `https://${url.host}` || origin === "http://localhost:5173";
+}
+
+async function hasOwnerKey(key: unknown, env: Env): Promise<boolean> {
+  const submittedKey = typeof key === "string" ? key : "";
+  const [submittedHash, ownerHash] = await Promise.all([
+    sha256Hex(submittedKey),
+    sha256Hex(env.OWNER_KEY)
+  ]);
+  return constantTimeEqual(submittedHash, ownerHash);
+}
+
 /**
  * PayPilot JSON API for the inbox UI. These routes are how the React app reads
  * data and records operator decisions — separate from the agent's tools so the
@@ -84,11 +146,51 @@ export class TriageAgent extends AIChatAgent<Env> {
  */
 async function handleApi(request: Request, env: Env): Promise<Response | null> {
   const { pathname } = new URL(request.url);
-  const json = (data: unknown, status = 200) =>
-    new Response(JSON.stringify(data), {
+  const json = (data: unknown, status = 200, headers?: HeadersInit) => {
+    const responseHeaders = new Headers(headers);
+    responseHeaders.set("content-type", "application/json");
+    return new Response(JSON.stringify(data), {
       status,
-      headers: { "content-type": "application/json" }
+      headers: responseHeaders
     });
+  };
+
+  if (!pathname.startsWith("/api/")) return null;
+
+  const isLogin = pathname === "/api/login" && request.method === "POST";
+  if (!isLogin && !(await isAuthed(request, env))) {
+    return json({ error: "unauthorized" }, 401);
+  }
+
+  if (isLogin) {
+    if (!sameOrigin(request)) return json({ error: "forbidden" }, 403);
+    const body = (await request.json().catch(() => ({}))) as { key?: unknown };
+    if (!(await hasOwnerKey(body.key, env))) {
+      return json({ error: "unauthorized" }, 401);
+    }
+    return json(
+      { ok: true },
+      200,
+      {
+        "Set-Cookie": `${SESSION_COOKIE}=${await sessionToken(env)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}`
+      }
+    );
+  }
+
+  if (pathname === "/api/logout" && request.method === "POST") {
+    if (!sameOrigin(request)) return json({ error: "forbidden" }, 403);
+    return json(
+      { ok: true },
+      200,
+      {
+        "Set-Cookie": `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`
+      }
+    );
+  }
+
+  if (pathname === "/api/me" && request.method === "GET") {
+    return json({ authed: true });
+  }
 
   if (pathname === "/api/inbox" && request.method === "GET") {
     return json({ transactions: await listInbox(env.DB, 50) });
@@ -108,10 +210,10 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
 
   const decideMatch = pathname.match(/^\/api\/resolutions\/([^/]+)\/decide$/);
   if (decideMatch && request.method === "POST") {
+    if (!sameOrigin(request)) return json({ error: "forbidden" }, 403);
     const id = decodeURIComponent(decideMatch[1]);
     const body = (await request.json().catch(() => ({}))) as {
       decision?: string;
-      operator_id?: string;
       note?: string;
     };
     if (body.decision !== "APPROVED" && body.decision !== "REJECTED") {
@@ -120,13 +222,13 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
     const res = await decideResolution(env.DB, {
       resolution_id: id,
       decision: body.decision,
-      operator_id: body.operator_id ?? "operator",
+      operator_id: "owner",
       note: body.note
     });
     return json(res, res.ok ? 200 : 400);
   }
 
-  return null; // not an API route — fall through
+  return json({ error: "not found" }, 404);
 }
 
 export default {
@@ -134,7 +236,16 @@ export default {
     const apiResponse = await handleApi(request, env);
     if (apiResponse) return apiResponse;
     return (
-      (await routeAgentRequest(request, env)) ||
+      (await routeAgentRequest(request, env, {
+        onBeforeConnect: async (req) =>
+          (await isAuthed(req, env)) && sameOrigin(req)
+            ? undefined
+            : new Response("unauthorized", { status: 401 }),
+        onBeforeRequest: async (req) =>
+          (await isAuthed(req, env))
+            ? undefined
+            : new Response("unauthorized", { status: 401 })
+      })) ||
       new Response("Not found", { status: 404 })
     );
   }
