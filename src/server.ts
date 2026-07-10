@@ -91,7 +91,7 @@ const decisionExportQuerySchema = z.object(decisionFilterShape);
 const createTransactionSchema = z.object({
   merchant_id: z.string().trim().min(1).max(64),
   amount_minor: z.number().int().positive(),
-  currency: z.string().trim().min(1).max(8).default("VND"),
+  currency: z.literal("VND").default("VND"),
   method: z.enum(["QR", "CARD", "SOFTPOS"]),
   status: z.enum(["SUCCESS", "FAILED", "FLAGGED", "PENDING"]),
   gateway_ref: z.string().max(255).optional(),

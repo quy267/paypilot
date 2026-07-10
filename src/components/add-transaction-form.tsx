@@ -31,7 +31,6 @@ interface AddTransactionFormProps {
 interface FormValues {
   merchantId: string;
   amountMinor: string;
-  currency: string;
   method: TransactionRow["method"];
   status: TransactionRow["status"];
   failureCode: string;
@@ -42,7 +41,6 @@ interface FormValues {
 const INITIAL_VALUES: FormValues = {
   merchantId: "",
   amountMinor: "",
-  currency: "VND",
   method: "QR",
   status: "FAILED",
   failureCode: "",
@@ -102,6 +100,7 @@ export function AddTransactionForm({
   const errorId = useId();
 
   const close = useCallback(() => {
+    if (submittingRef.current) return;
     requestControllerRef.current?.abort();
     onClose();
   }, [onClose]);
@@ -190,7 +189,6 @@ export function AddTransactionForm({
       if (submittingRef.current) return;
 
       const merchantId = values.merchantId.trim();
-      const currency = values.currency.trim();
       const amountMinor = Number(values.amountMinor);
       if (!merchantId) {
         setError("Merchant không được để trống");
@@ -201,11 +199,6 @@ export function AddTransactionForm({
         setError("Số tiền phải là số nguyên lớn hơn 0");
         return;
       }
-      if (!currency) {
-        setError("Tiền tệ không được để trống");
-        return;
-      }
-
       const optional = (value: string) => value.trim() || undefined;
       const controller = new AbortController();
       requestControllerRef.current = controller;
@@ -220,7 +213,7 @@ export function AddTransactionForm({
           body: JSON.stringify({
             merchant_id: merchantId,
             amount_minor: amountMinor,
-            currency,
+            currency: "VND",
             method: values.method,
             status: values.status,
             gateway_ref: optional(values.gatewayRef),
@@ -284,6 +277,7 @@ export function AddTransactionForm({
         type="button"
         aria-label="Đóng"
         tabIndex={-1}
+        disabled={submitting}
         className="absolute inset-0 cursor-default bg-foreground/50"
         onMouseDown={close}
       />
@@ -304,6 +298,7 @@ export function AddTransactionForm({
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Đóng"
+                disabled={submitting}
                 onClick={close}
               >
                 <X aria-hidden="true" />
@@ -375,17 +370,9 @@ export function AddTransactionForm({
                   id="txn-currency"
                   name="currency"
                   aria-label="Tiền tệ"
-                  value={values.currency}
-                  onChange={(event) =>
-                    setValues((current) => ({
-                      ...current,
-                      currency: event.target.value
-                    }))
-                  }
+                  value="VND"
                   className={inputClassName}
-                  maxLength={8}
-                  required
-                  autoComplete="off"
+                  disabled
                 />
               </div>
             </div>
@@ -529,6 +516,7 @@ export function AddTransactionForm({
               type="button"
               variant="outline"
               className="w-full sm:w-auto"
+              disabled={submitting}
               onClick={close}
             >
               Hủy

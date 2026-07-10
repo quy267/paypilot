@@ -8,6 +8,17 @@
 
 Khi một giao dịch thanh toán lỗi hoặc nghi ngờ, đội vận hành thường phải chờ đội kỹ thuật hoặc đội dữ liệu tra cứu giúp, xử lý chậm và khó truy nguyên. **PayPilot** dành cho **nhân viên vận hành thanh toán**: giúp họ tự xử lý sự cố nhanh và đáng tin cậy, không cần biết truy vấn cơ sở dữ liệu.
 
+## Tính năng
+
+- Engine chấm điểm ưu tiên minh bạch cho hàng đợi triage, kết hợp số tiền, tuổi/SLA, rủi ro và độ tự tin, kèm breakdown từng thành phần.
+- Lọc, tìm kiếm, sắp xếp và phân trang inbox.
+- Shell nhiều trang với sidebar điều hướng.
+- Dashboard KPI và biểu đồ dùng dữ liệu từ `/api/stats`.
+- Lịch sử quyết định và xuất CSV.
+- Form thêm giao dịch thủ công, chỉ hỗ trợ VND.
+
+> **Lưu ý:** PayPilot hiện chỉ hỗ trợ giao dịch bằng VND.
+
 ## Phạm vi bản tối thiểu (MVP) — giữ nhỏ, làm xong được trong khóa
 
 Một luồng hoàn chỉnh, **một loại lỗi → một hành động → một lượt duyệt**:
