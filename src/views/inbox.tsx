@@ -23,6 +23,7 @@ import { InboxList } from "@/components/inbox-list";
 import { TransactionDetail } from "@/components/transaction-detail";
 import { ResolutionCard } from "@/components/resolution-card";
 import { AgentActivity } from "@/components/agent-activity";
+import { AddTransactionForm } from "@/components/add-transaction-form";
 
 interface TransactionDetailData {
   transaction: TransactionRow;
@@ -70,6 +71,7 @@ export function InboxView() {
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
   const [deciding, setDeciding] = useState(false);
   const [followUp, setFollowUp] = useState("");
+  const [addTransactionOpen, setAddTransactionOpen] = useState(false);
   const wasStreaming = useRef(false);
   // Prevent a slower request for stale controls from replacing the current page.
   const latestInboxReq = useRef(0);
@@ -306,6 +308,19 @@ export function InboxView() {
     sendMessage({ role: "user", parts: [{ type: "text", text }] });
   }, [followUp, triaging, sendMessage]);
 
+  const openAddTransaction = useCallback(() => {
+    setAddTransactionOpen(true);
+  }, []);
+
+  const closeAddTransaction = useCallback(() => {
+    setAddTransactionOpen(false);
+  }, []);
+
+  const transactionCreated = useCallback(() => {
+    setAddTransactionOpen(false);
+    void refreshInbox();
+  }, [refreshInbox]);
+
   const txn = detail?.transaction;
   const latestResolution = detail?.resolutions[0];
 
@@ -313,11 +328,23 @@ export function InboxView() {
     <div className="flex h-full min-h-0 bg-background text-foreground">
       {/* Left: inbox */}
       <aside className="flex w-80 shrink-0 flex-col border-r bg-card">
-        <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
-          <div className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-            Cần xử lý ({inboxPage.total})
+        <div className="border-b px-4 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+              Cần xử lý ({inboxPage.total})
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={openAddTransaction}
+              aria-haspopup="dialog"
+              aria-expanded={addTransactionOpen}
+            >
+              Thêm giao dịch
+            </Button>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="mt-1 flex items-center justify-end gap-1">
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span
                 className={cn(
@@ -440,6 +467,12 @@ export function InboxView() {
           </div>
         )}
       </section>
+
+      <AddTransactionForm
+        open={addTransactionOpen}
+        onClose={closeAddTransaction}
+        onCreated={transactionCreated}
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { convertToModelMessages, pruneMessages, streamText } from "ai";
 import { z } from "zod";
 import {
   buildEvidence,
+  createTransaction,
   decideResolution,
   getTransaction,
   listResolutions,
@@ -87,6 +88,16 @@ const decisionsQuerySchema = z
     offset: query.offset ?? 0
   }));
 const decisionExportQuerySchema = z.object(decisionFilterShape);
+const createTransactionSchema = z.object({
+  merchant_id: z.string().trim().min(1).max(64),
+  amount_minor: z.number().int().positive(),
+  currency: z.string().trim().min(1).max(8).default("VND"),
+  method: z.enum(["QR", "CARD", "SOFTPOS"]),
+  status: z.enum(["SUCCESS", "FAILED", "FLAGGED", "PENDING"]),
+  gateway_ref: z.string().max(255).optional(),
+  failure_code: z.string().max(255).optional(),
+  failure_reason: z.string().max(255).optional()
+});
 
 function excelSafeText(value: string | null): string | null {
   if (value === null || !/^[=+\-@\t\r]/.test(value)) return value;
@@ -261,6 +272,24 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
       limit,
       offset
     });
+  }
+
+  if (pathname === "/api/transactions" && request.method === "POST") {
+    if (!sameOrigin(request)) return json({ error: "forbidden" }, 403);
+    const body: unknown = await request.json().catch(() => ({}));
+    const parsedBody = createTransactionSchema.safeParse(body);
+    if (!parsedBody.success) {
+      return json(
+        {
+          error: "Dữ liệu giao dịch không hợp lệ",
+          code: "invalid_transaction"
+        },
+        422
+      );
+    }
+
+    const transaction = await createTransaction(env.DB, parsedBody.data);
+    return json({ transaction }, 201);
   }
 
   if (pathname === "/api/decisions" && request.method === "GET") {

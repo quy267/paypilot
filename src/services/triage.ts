@@ -77,6 +77,58 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+export interface CreateTransactionInput {
+  merchant_id: string;
+  gateway_ref?: string | null;
+  amount_minor: number;
+  currency: string;
+  method: TransactionRow["method"];
+  status: TransactionRow["status"];
+  failure_code?: string | null;
+  failure_reason?: string | null;
+}
+
+/** Insert a manually entered transaction and return the row written to D1. */
+export async function createTransaction(
+  db: D1Database,
+  input: CreateTransactionInput
+): Promise<TransactionRow> {
+  const transaction: TransactionRow = {
+    id: `txn_${crypto.randomUUID().slice(0, 12)}`,
+    merchant_id: input.merchant_id,
+    gateway_ref: input.gateway_ref ?? null,
+    amount_minor: input.amount_minor,
+    currency: input.currency,
+    method: input.method,
+    status: input.status,
+    failure_code: input.failure_code ?? null,
+    failure_reason: input.failure_reason ?? null,
+    created_at: nowSeconds()
+  };
+
+  await db
+    .prepare(
+      `INSERT INTO transactions
+         (id, merchant_id, gateway_ref, amount_minor, currency, method, status, failure_code, failure_reason, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      transaction.id,
+      transaction.merchant_id,
+      transaction.gateway_ref,
+      transaction.amount_minor,
+      transaction.currency,
+      transaction.method,
+      transaction.status,
+      transaction.failure_code,
+      transaction.failure_reason,
+      transaction.created_at
+    )
+    .run();
+
+  return transaction;
+}
+
 /**
  * Open items for the inbox, prioritized: FLAGGED first (review risk), then FAILED,
  * then PENDING; within a status, largest amount first, then newest.
