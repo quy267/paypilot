@@ -40,7 +40,7 @@ Hai bảng (chi tiết trong [`schema.sql`](schema.sql), dữ liệu mẫu trong
 ## Công nghệ dự kiến
 
 - **Ưu tiên Cloudflare:** Workers (chạy code), Durable Objects (lưu trí nhớ hội thoại), D1 (cơ sở dữ liệu giao dịch), AI Gateway (giám sát + lưu đệm lời gọi AI), Queues (xử lý việc nặng), và TanStack Start cho giao diện cập nhật trực tiếp.
-- **Phương án thay thế** nếu khóa yêu cầu công nghệ phổ thông hơn: Next.js + Supabase (Postgres) + Vercel AI SDK — giữ nguyên phần xử lý AI, công cụ và kiểm thử. *(Chờ mentor chốt.)*
+- **Phương án thay thế** nếu khóa yêu cầu công nghệ phổ thông hơn: Next.js + Supabase (Postgres) + Vercel AI SDK — giữ nguyên phần xử lý AI, công cụ và kiểm thử. _(Chờ mentor chốt.)_
 
 ## Tái sử dụng
 
@@ -79,7 +79,7 @@ CLOUDFLARE_API_TOKEN=<token quyền Workers AI Read>
 
 Token: Cloudflare dashboard → My Profile → API Tokens → Create Token → quyền **Workers AI: Read** (phạm vi Account).
 
-Mỗi tình huống đo: có gọi `proposeResolution` không, đúng giao dịch không, hành động (`RETRY`/`ESCALATE`/`REFUND`) có nằm trong tập kỳ vọng không, có chain tool (`getTransaction` → `proposeResolution`) không, và luật `REFUND` chỉ cho `FLAGGED` có được tôn trọng không. In ra % chính xác. *(Model thật nên % có thể dao động nhẹ giữa các lần chạy.)*
+Mỗi tình huống đo: có gọi `proposeResolution` không, đúng giao dịch không, hành động (`RETRY`/`ESCALATE`/`REFUND`) có nằm trong tập kỳ vọng không, có chain tool (`getTransaction` → `proposeResolution`) không, và luật `REFUND` chỉ cho `FLAGGED` có được tôn trọng không. In ra % chính xác. _(Model thật nên % có thể dao động nhẹ giữa các lần chạy.)_
 
 ## Trạng thái
 

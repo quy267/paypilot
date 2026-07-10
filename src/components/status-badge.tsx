@@ -10,7 +10,7 @@ export function StatusBadge({
   tone,
   children,
   dot = false,
-  className,
+  className
 }: {
   tone: Tone;
   children: ReactNode;

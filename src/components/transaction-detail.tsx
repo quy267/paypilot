@@ -8,7 +8,7 @@ import { STATUS_LABEL, statusTone, vnd } from "@/lib/format";
 function DetailRow({
   label,
   value,
-  mono = false,
+  mono = false
 }: {
   label: string;
   value: ReactNode;
@@ -18,7 +18,10 @@ function DetailRow({
     <div className="flex items-center justify-between gap-3 py-2.5 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span
-        className={cn("text-right font-medium text-foreground", mono && "font-mono")}
+        className={cn(
+          "text-right font-medium text-foreground",
+          mono && "font-mono"
+        )}
       >
         {value}
       </span>

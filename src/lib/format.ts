@@ -15,7 +15,7 @@ export const STATUS_LABEL: Record<TransactionRow["status"], string> = {
   FAILED: "Lỗi",
   FLAGGED: "Nghi ngờ",
   PENDING: "Đang chờ",
-  SUCCESS: "Thành công",
+  SUCCESS: "Thành công"
 };
 export const ACTION_LABEL: Record<
   NonNullable<ResolutionRow["proposed_action"]>,
@@ -23,14 +23,16 @@ export const ACTION_LABEL: Record<
 > = {
   RETRY: "Thử lại",
   ESCALATE: "Chuyển cấp trên",
-  REFUND: "Hoàn tiền",
+  REFUND: "Hoàn tiền"
 };
-export const DECISION_LABEL: Record<ResolutionRow["operator_decision"], string> =
-  {
-    PENDING: "Chờ duyệt",
-    APPROVED: "Đã duyệt",
-    REJECTED: "Từ chối",
-  };
+export const DECISION_LABEL: Record<
+  ResolutionRow["operator_decision"],
+  string
+> = {
+  PENDING: "Chờ duyệt",
+  APPROVED: "Đã duyệt",
+  REJECTED: "Từ chối"
+};
 
 /** Transaction status → colour tone (amber=flagged, red=failed, blue=pending, green=success). */
 export function statusTone(status: string): Tone {

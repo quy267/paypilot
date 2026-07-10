@@ -15,7 +15,7 @@ import { ACTION_LABEL, DECISION_LABEL, decisionTone } from "@/lib/format";
 export function ResolutionCard({
   resolution,
   onDecide,
-  deciding,
+  deciding
 }: {
   resolution: ResolutionRow;
   onDecide: (

@@ -137,7 +137,8 @@ export async function proposeResolution(
   if (input.action === "REFUND" && txn.status !== "FLAGGED") {
     return {
       ok: false,
-      error: "REFUND is only allowed for FLAGGED transactions, not " + txn.status
+      error:
+        "REFUND is only allowed for FLAGGED transactions, not " + txn.status
     };
   }
   if (input.confidence < 0 || input.confidence > 1) {

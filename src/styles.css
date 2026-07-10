@@ -12,8 +12,12 @@
 /* ── PayPilot design tokens (from claude.ai/design: PayPilot.dc.html) ───────── */
 :root {
   --radius: 0.75rem;
-  --sans: "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans:
+    "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --mono:
+    "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", Menlo,
+    Consolas, monospace;
 
   --background: #f6f8fc;
   --foreground: #101a2e;
@@ -35,14 +39,30 @@
   --input: #e5e9f5;
   --ring: #4f46e5;
 
-  --shadow-card: 0 1px 2px 0 rgb(16 24 40 / 0.04), 0 2px 8px -2px rgb(16 24 40 / 0.08);
+  --shadow-card:
+    0 1px 2px 0 rgb(16 24 40 / 0.04), 0 2px 8px -2px rgb(16 24 40 / 0.08);
 
   /* Status tones: amber=FLAGGED, red=FAILED, blue=PENDING, green=SUCCESS, neutral=default */
-  --t-amber-dot: #f59e0b; --t-amber-bg: #fffbeb; --t-amber-fg: #b45309; --t-amber-bd: #fde68a;
-  --t-red-dot:   #ef4444; --t-red-bg:   #fef2f2; --t-red-fg:   #b91c1c; --t-red-bd:   #fecaca;
-  --t-blue-dot:  #3b82f6; --t-blue-bg:  #eff6ff; --t-blue-fg:  #1d4ed8; --t-blue-bd:  #bfdbfe;
-  --t-green-dot: #22c55e; --t-green-bg: #f0fdf4; --t-green-fg: #15803d; --t-green-bd: #bbf7d0;
-  --t-neutral-dot: #64748b; --t-neutral-bg: #f1f5f9; --t-neutral-fg: #475569; --t-neutral-bd: #e2e8f0;
+  --t-amber-dot: #f59e0b;
+  --t-amber-bg: #fffbeb;
+  --t-amber-fg: #b45309;
+  --t-amber-bd: #fde68a;
+  --t-red-dot: #ef4444;
+  --t-red-bg: #fef2f2;
+  --t-red-fg: #b91c1c;
+  --t-red-bd: #fecaca;
+  --t-blue-dot: #3b82f6;
+  --t-blue-bg: #eff6ff;
+  --t-blue-fg: #1d4ed8;
+  --t-blue-bd: #bfdbfe;
+  --t-green-dot: #22c55e;
+  --t-green-bg: #f0fdf4;
+  --t-green-fg: #15803d;
+  --t-green-bd: #bbf7d0;
+  --t-neutral-dot: #64748b;
+  --t-neutral-bg: #f1f5f9;
+  --t-neutral-fg: #475569;
+  --t-neutral-bd: #e2e8f0;
 }
 
 [data-mode="dark"] {
@@ -68,11 +88,26 @@
 
   --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.4);
 
-  --t-amber-dot: #fbbf24; --t-amber-bg: rgb(245 158 11 / 0.13); --t-amber-fg: #fcd34d; --t-amber-bd: rgb(245 158 11 / 0.30);
-  --t-red-dot:   #f87171; --t-red-bg:   rgb(239 68 68 / 0.13);  --t-red-fg:   #fca5a5; --t-red-bd:   rgb(239 68 68 / 0.30);
-  --t-blue-dot:  #60a5fa; --t-blue-bg:  rgb(59 130 246 / 0.13); --t-blue-fg:  #93c5fd; --t-blue-bd:  rgb(59 130 246 / 0.30);
-  --t-green-dot: #4ade80; --t-green-bg: rgb(34 197 94 / 0.13);  --t-green-fg: #86efac; --t-green-bd: rgb(34 197 94 / 0.30);
-  --t-neutral-dot: #94a3b8; --t-neutral-bg: #1e293b; --t-neutral-fg: #94a3b8; --t-neutral-bd: #334155;
+  --t-amber-dot: #fbbf24;
+  --t-amber-bg: rgb(245 158 11 / 0.13);
+  --t-amber-fg: #fcd34d;
+  --t-amber-bd: rgb(245 158 11 / 0.3);
+  --t-red-dot: #f87171;
+  --t-red-bg: rgb(239 68 68 / 0.13);
+  --t-red-fg: #fca5a5;
+  --t-red-bd: rgb(239 68 68 / 0.3);
+  --t-blue-dot: #60a5fa;
+  --t-blue-bg: rgb(59 130 246 / 0.13);
+  --t-blue-fg: #93c5fd;
+  --t-blue-bd: rgb(59 130 246 / 0.3);
+  --t-green-dot: #4ade80;
+  --t-green-bg: rgb(34 197 94 / 0.13);
+  --t-green-fg: #86efac;
+  --t-green-bd: rgb(34 197 94 / 0.3);
+  --t-neutral-dot: #94a3b8;
+  --t-neutral-bg: #1e293b;
+  --t-neutral-fg: #94a3b8;
+  --t-neutral-bd: #334155;
 }
 
 /* Map tokens to Tailwind utilities (bg-background, text-foreground, font-sans, shadow-card, …) */
@@ -120,16 +155,46 @@
 
 /* Status pill + dot tones, driven by the --t-* tokens above (auto light/dark) */
 @layer components {
-  .tone-amber   { background: var(--t-amber-bg);   color: var(--t-amber-fg);   border-color: var(--t-amber-bd); }
-  .tone-red     { background: var(--t-red-bg);     color: var(--t-red-fg);     border-color: var(--t-red-bd); }
-  .tone-blue    { background: var(--t-blue-bg);    color: var(--t-blue-fg);    border-color: var(--t-blue-bd); }
-  .tone-green   { background: var(--t-green-bg);   color: var(--t-green-fg);   border-color: var(--t-green-bd); }
-  .tone-neutral { background: var(--t-neutral-bg); color: var(--t-neutral-fg); border-color: var(--t-neutral-bd); }
-  .dot-amber   { background: var(--t-amber-dot); }
-  .dot-red     { background: var(--t-red-dot); }
-  .dot-blue    { background: var(--t-blue-dot); }
-  .dot-green   { background: var(--t-green-dot); }
-  .dot-neutral { background: var(--t-neutral-dot); }
+  .tone-amber {
+    background: var(--t-amber-bg);
+    color: var(--t-amber-fg);
+    border-color: var(--t-amber-bd);
+  }
+  .tone-red {
+    background: var(--t-red-bg);
+    color: var(--t-red-fg);
+    border-color: var(--t-red-bd);
+  }
+  .tone-blue {
+    background: var(--t-blue-bg);
+    color: var(--t-blue-fg);
+    border-color: var(--t-blue-bd);
+  }
+  .tone-green {
+    background: var(--t-green-bg);
+    color: var(--t-green-fg);
+    border-color: var(--t-green-bd);
+  }
+  .tone-neutral {
+    background: var(--t-neutral-bg);
+    color: var(--t-neutral-fg);
+    border-color: var(--t-neutral-bd);
+  }
+  .dot-amber {
+    background: var(--t-amber-dot);
+  }
+  .dot-red {
+    background: var(--t-red-dot);
+  }
+  .dot-blue {
+    background: var(--t-blue-dot);
+  }
+  .dot-green {
+    background: var(--t-green-dot);
+  }
+  .dot-neutral {
+    background: var(--t-neutral-dot);
+  }
 }
 
 html,

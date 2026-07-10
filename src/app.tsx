@@ -50,11 +50,11 @@ function PayPilot({ onLogout }: PayPilotProps) {
     agent: "TriageAgent",
     onOpen: useCallback(() => setConnected(true), []),
     onClose: useCallback(() => setConnected(false), []),
-    onError: useCallback((e: Event) => console.error("WebSocket error:", e), []),
+    onError: useCallback((e: Event) => console.error("WebSocket error:", e), [])
   });
 
   const { messages, sendMessage, clearHistory, status, stop } = useAgentChat({
-    agent,
+    agent
   });
   const isStreaming = status === "streaming" || status === "submitted";
 
@@ -119,9 +119,9 @@ function PayPilot({ onLogout }: PayPilotProps) {
       parts: [
         {
           type: "text",
-          text: `Xử lý riêng giao dịch ${id}: gọi getTransaction("${id}"), chẩn đoán nguyên nhân kèm bằng chứng, đề xuất đúng một hành động kèm độ tin cậy, rồi GỌI proposeResolution. Hoàn tất tất cả các bước.`,
-        },
-      ],
+          text: `Xử lý riêng giao dịch ${id}: gọi getTransaction("${id}"), chẩn đoán nguyên nhân kèm bằng chứng, đề xuất đúng một hành động kèm độ tin cậy, rồi GỌI proposeResolution. Hoàn tất tất cả các bước.`
+        }
+      ]
     });
     // The agent writes its resolution to D1 even when the chat stream never signals
     // completion to the client, so poll the detail endpoint directly until the
@@ -158,7 +158,7 @@ function PayPilot({ onLogout }: PayPilotProps) {
         await fetch(`/api/resolutions/${resolutionId}/decide`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ decision, note }),
+          body: JSON.stringify({ decision, note })
         });
         if (selectedId) await refreshDetail(selectedId);
         await refreshInbox();
@@ -229,7 +229,11 @@ function PayPilot({ onLogout }: PayPilotProps) {
             Cần xử lý ({inbox.length})
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <InboxList items={inbox} selectedId={selectedId} onSelect={select} />
+            <InboxList
+              items={inbox}
+              selectedId={selectedId}
+              onSelect={select}
+            />
           </div>
         </aside>
 

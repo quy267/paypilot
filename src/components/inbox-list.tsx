@@ -7,7 +7,7 @@ import { STATUS_LABEL, statusTone, vnd } from "@/lib/format";
 export function InboxList({
   items,
   selectedId,
-  onSelect,
+  onSelect
 }: {
   items: TransactionRow[];
   selectedId: string | null;
@@ -40,7 +40,12 @@ export function InboxList({
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="flex min-w-0 items-center gap-2">
-                  <span className={cn("size-2 shrink-0 rounded-full", `dot-${tone}`)} />
+                  <span
+                    className={cn(
+                      "size-2 shrink-0 rounded-full",
+                      `dot-${tone}`
+                    )}
+                  />
                   <span className="truncate font-mono text-sm font-medium">
                     {t.id}
                   </span>

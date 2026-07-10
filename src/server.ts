@@ -168,24 +168,16 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
     if (!(await hasOwnerKey(body.key, env))) {
       return json({ error: "unauthorized" }, 401);
     }
-    return json(
-      { ok: true },
-      200,
-      {
-        "Set-Cookie": `${SESSION_COOKIE}=${await sessionToken(env)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}`
-      }
-    );
+    return json({ ok: true }, 200, {
+      "Set-Cookie": `${SESSION_COOKIE}=${await sessionToken(env)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}`
+    });
   }
 
   if (pathname === "/api/logout" && request.method === "POST") {
     if (!sameOrigin(request)) return json({ error: "forbidden" }, 403);
-    return json(
-      { ok: true },
-      200,
-      {
-        "Set-Cookie": `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`
-      }
-    );
+    return json({ ok: true }, 200, {
+      "Set-Cookie": `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`
+    });
   }
 
   if (pathname === "/api/me" && request.method === "GET") {
@@ -245,8 +237,7 @@ export default {
           (await isAuthed(req, env))
             ? undefined
             : new Response("unauthorized", { status: 401 })
-      })) ||
-      new Response("Not found", { status: 404 })
+      })) || new Response("Not found", { status: 404 })
     );
   }
 } satisfies ExportedHandler<Env>;

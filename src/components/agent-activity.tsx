@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Collapsible,
   CollapsibleContent,
-  CollapsibleTrigger,
+  CollapsibleTrigger
 } from "@/components/ui/collapsible";
 
 /** One agent tool call rendered as a compact chip (spinning while running, ✓ when done). */
@@ -62,7 +62,7 @@ export function AgentActivity({
   followUp,
   onFollowUpChange,
   onSend,
-  connected,
+  connected
 }: {
   messages: UIMessage[];
   isStreaming: boolean;
@@ -102,7 +102,10 @@ export function AgentActivity({
             .join(" ");
           if (!text) return null;
           return (
-            <div key={message.id} className="text-xs text-muted-foreground italic">
+            <div
+              key={message.id}
+              className="text-xs text-muted-foreground italic"
+            >
               ▶ {text}
             </div>
           );
