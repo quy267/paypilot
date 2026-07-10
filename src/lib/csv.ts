@@ -1,5 +1,5 @@
 function escapeCsvField(value: string | number | null): string {
-  if (value === null) return "";
+  if (value == null) return "";
 
   const text = String(value);
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;

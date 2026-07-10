@@ -6,13 +6,14 @@
 
 import { stepCountIs, tool } from "ai";
 import { z } from "zod";
+import { rankInbox } from "../services/priority";
 import {
   buildEvidence,
   formatAmount,
   getTransaction,
-  listInbox,
   listResolutions,
-  proposeResolution
+  proposeResolution,
+  queryInboxRows
 } from "../services/triage";
 
 /** Workers AI model id used for triage (Kimi, free tier). */
@@ -24,7 +25,7 @@ export const TRIAGE_STOP = stepCountIs(8);
 export const SYSTEM_PROMPT = `You are PayPilot, an AI assistant for a payment operations team. You triage failed, flagged, or stuck payment transactions.
 
 When the user asks you to handle/triage an exception, you MUST complete this whole sequence in one turn. Do NOT stop after the first tool call, and do NOT ask the user what to do next:
-STEP 1 — Call listInbox to see open transactions (already prioritized: FLAGGED first, then largest amount, then newest).
+STEP 1 — Call listInbox to see open transactions (already ranked by priority — a weighted score of amount, age vs SLA, risk, and AI confidence; higher \`priority\` = handle first).
 STEP 2 — Choose the most urgent transaction (or the one the user names) and call getTransaction with its id to read full details + evidence.
 STEP 3 — Decide exactly ONE action:
    - RETRY — transient failures (e.g. TIMEOUT, GATEWAY_ERROR) where money was not captured.
@@ -50,28 +51,25 @@ export function buildTriageTools(DB: D1Database) {
     // Read: the inbox of open transactions, already prioritized.
     listInbox: tool({
       description:
-        "List open payment transactions that need attention (FAILED, FLAGGED, or PENDING), already prioritized.",
-      inputSchema: z.object({
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
-          .optional()
-          .describe("Max rows to return (default 20)")
-      }),
-      execute: async ({ limit }) => {
-        const rows = await listInbox(DB, limit ?? 20);
+        "List up to 50 open payment transactions that need attention (FAILED, FLAGGED, or PENDING), ordered by priority.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const rows = await queryInboxRows(DB);
+        const ranked = rankInbox(rows, Math.floor(Date.now() / 1000)).slice(
+          0,
+          50
+        );
         return {
-          count: rows.length,
-          transactions: rows.map((t) => ({
+          count: ranked.length,
+          transactions: ranked.map((t) => ({
             id: t.id,
             status: t.status,
             method: t.method,
             amount: formatAmount(t.amount_minor, t.currency),
             failure_code: t.failure_code,
             failure_reason: t.failure_reason,
-            merchant_id: t.merchant_id
+            merchant_id: t.merchant_id,
+            priority: Math.round(t.score * 100)
           }))
         };
       }
