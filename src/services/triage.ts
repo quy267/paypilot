@@ -74,20 +74,44 @@ export async function listInbox(
  * Open inbox rows plus the latest still-pending proposal confidence for scoring.
  * The correlated LEFT JOIN keeps transactions without a proposal and avoids N+1 reads.
  */
+export interface QueryInboxOptions {
+  statuses?: string[];
+  q?: string;
+  candidateLimit?: number;
+}
+
 export async function queryInboxRows(
   db: D1Database,
-  statuses?: string[],
-  candidateLimit = 500
+  opts: QueryInboxOptions = {}
 ): Promise<Array<TransactionRow & { pending_confidence: number | null }>> {
-  const inboxStatuses = statuses ?? ["FAILED", "FLAGGED", "PENDING"];
+  const inboxStatuses = opts.statuses ?? ["FAILED", "FLAGGED", "PENDING"];
   if (inboxStatuses.length === 0) return [];
 
   const placeholders = inboxStatuses
     .map((_, index) => `?${index + 1}`)
     .join(", ");
+  const bindings: Array<string | number> = [...inboxStatuses];
+  const searchTerm = opts.q?.trim();
+  let searchClause = "";
+  if (searchTerm) {
+    // Escape LIKE wildcards (and the escape character itself) so operator input
+    // is always treated as a literal substring.
+    const escapedTerm = searchTerm.toLowerCase().replace(/[\\%_]/g, "\\$&");
+    bindings.push(`%${escapedTerm}%`);
+    const searchPlaceholder = `?${bindings.length}`;
+    searchClause = `
+       AND (
+         LOWER(transactions.id) LIKE ${searchPlaceholder} ESCAPE '\\'
+         OR LOWER(transactions.merchant_id) LIKE ${searchPlaceholder} ESCAPE '\\'
+         OR LOWER(COALESCE(transactions.gateway_ref, '')) LIKE ${searchPlaceholder} ESCAPE '\\'
+         OR LOWER(COALESCE(transactions.failure_code, '')) LIKE ${searchPlaceholder} ESCAPE '\\'
+       )`;
+  }
+
   // Bound the candidate scan so a large backlog can't force an unbounded read;
-  // the caller ranks these on-the-fly and returns only the top slice. Phase 2 adds real paging.
-  const limitPlaceholder = `?${inboxStatuses.length + 1}`;
+  // the caller ranks these on-the-fly before paging the bounded result set.
+  bindings.push(opts.candidateLimit ?? 500);
+  const limitPlaceholder = `?${bindings.length}`;
   const { results } = await db
     .prepare(
       `SELECT transactions.*, pending_resolution.confidence AS pending_confidence
@@ -101,11 +125,11 @@ export async function queryInboxRows(
            ORDER BY resolution.created_at DESC, resolution.id DESC
            LIMIT 1
          )
-       WHERE transactions.status IN (${placeholders})
+       WHERE transactions.status IN (${placeholders})${searchClause}
        ORDER BY transactions.created_at DESC
        LIMIT ${limitPlaceholder}`
     )
-    .bind(...inboxStatuses, candidateLimit)
+    .bind(...bindings)
     .all<TransactionRow & { pending_confidence: number | null }>();
   return results ?? [];
 }

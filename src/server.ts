@@ -10,6 +10,7 @@ import {
   queryInboxRows
 } from "./services/triage";
 import { rankInbox } from "./services/priority";
+import { inboxQuerySchema, sortScoredInbox } from "./services/inbox-query";
 import {
   SYSTEM_PROMPT,
   TRIAGE_MODEL_ID,
@@ -146,7 +147,8 @@ async function hasOwnerKey(key: unknown, env: Env): Promise<boolean> {
  * `/api/*` is listed in wrangler.jsonc `run_worker_first` so it reaches here.
  */
 async function handleApi(request: Request, env: Env): Promise<Response | null> {
-  const { pathname } = new URL(request.url);
+  const url = new URL(request.url);
+  const { pathname } = url;
   const json = (data: unknown, status = 200, headers?: HeadersInit) => {
     const responseHeaders = new Headers(headers);
     responseHeaders.set("content-type", "application/json");
@@ -186,10 +188,35 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
   }
 
   if (pathname === "/api/inbox" && request.method === "GET") {
-    const rows = await queryInboxRows(env.DB);
-    // Rank all candidates on-the-fly, then return only the top slice (bounded payload).
+    const parsedQuery = inboxQuerySchema.safeParse(
+      Object.fromEntries(url.searchParams.entries())
+    );
+    if (!parsedQuery.success) {
+      return json(
+        {
+          error: "Tham số truy vấn không hợp lệ",
+          code: "invalid_query"
+        },
+        400
+      );
+    }
+
+    const { status, q, sort, order, limit, offset } = parsedQuery.data;
+    const candidates = await queryInboxRows(env.DB, {
+      statuses: status ? [status] : undefined,
+      q
+    });
+    const scored = rankInbox(candidates, Math.floor(Date.now() / 1000));
+
+    sortScoredInbox(scored, sort, order);
+
+    // `total` covers only the bounded candidate set returned by queryInboxRows.
+    const total = scored.length;
     return json({
-      transactions: rankInbox(rows, Math.floor(Date.now() / 1000)).slice(0, 50)
+      transactions: scored.slice(offset, offset + limit),
+      total,
+      limit,
+      offset
     });
   }
 
