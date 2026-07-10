@@ -70,6 +70,46 @@ export async function listInbox(
   return results ?? [];
 }
 
+/**
+ * Open inbox rows plus the latest still-pending proposal confidence for scoring.
+ * The correlated LEFT JOIN keeps transactions without a proposal and avoids N+1 reads.
+ */
+export async function queryInboxRows(
+  db: D1Database,
+  statuses?: string[],
+  candidateLimit = 500
+): Promise<Array<TransactionRow & { pending_confidence: number | null }>> {
+  const inboxStatuses = statuses ?? ["FAILED", "FLAGGED", "PENDING"];
+  if (inboxStatuses.length === 0) return [];
+
+  const placeholders = inboxStatuses
+    .map((_, index) => `?${index + 1}`)
+    .join(", ");
+  // Bound the candidate scan so a large backlog can't force an unbounded read;
+  // the caller ranks these on-the-fly and returns only the top slice. Phase 2 adds real paging.
+  const limitPlaceholder = `?${inboxStatuses.length + 1}`;
+  const { results } = await db
+    .prepare(
+      `SELECT transactions.*, pending_resolution.confidence AS pending_confidence
+       FROM transactions
+       LEFT JOIN resolutions AS pending_resolution
+         ON pending_resolution.id = (
+           SELECT resolution.id
+           FROM resolutions AS resolution
+           WHERE resolution.transaction_id = transactions.id
+             AND resolution.operator_decision = 'PENDING'
+           ORDER BY resolution.created_at DESC, resolution.id DESC
+           LIMIT 1
+         )
+       WHERE transactions.status IN (${placeholders})
+       ORDER BY transactions.created_at DESC
+       LIMIT ${limitPlaceholder}`
+    )
+    .bind(...inboxStatuses, candidateLimit)
+    .all<TransactionRow & { pending_confidence: number | null }>();
+  return results ?? [];
+}
+
 export async function getTransaction(
   db: D1Database,
   id: string

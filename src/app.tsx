@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { TriageAgent } from "./server";
 import type { ResolutionRow, TransactionRow } from "@/services/triage";
+import type { ScoredTransaction } from "@/services/priority";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -31,7 +32,7 @@ interface PayPilotProps {
 
 function PayPilot({ onLogout }: PayPilotProps) {
   const [connected, setConnected] = useState(false);
-  const [inbox, setInbox] = useState<TransactionRow[]>([]);
+  const [inbox, setInbox] = useState<ScoredTransaction[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
   const [deciding, setDeciding] = useState(false);
@@ -61,7 +62,7 @@ function PayPilot({ onLogout }: PayPilotProps) {
   const refreshInbox = useCallback(async () => {
     try {
       const res = await fetch("/api/inbox");
-      const data = (await res.json()) as { transactions?: TransactionRow[] };
+      const data = (await res.json()) as { transactions?: ScoredTransaction[] };
       setInbox(data.transactions ?? []);
     } catch (e) {
       console.error("Failed to load inbox:", e);

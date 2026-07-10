@@ -17,6 +17,7 @@
     "types": "wrangler types env.d.ts --include-runtime false",
     "format": "oxfmt --write .",
     "lint": "oxlint src/",
+    "test": "vitest run",
     "check": "oxfmt --check . && oxlint src/ && tsc",
     "eval": "tsx eval/run-eval.ts"
   },
@@ -56,6 +57,7 @@
     "tsx": "^4.23.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
+    "vitest": "^3.2.6",
     "wrangler": "^4.105.0"
   }
 }

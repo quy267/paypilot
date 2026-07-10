@@ -1,7 +1,21 @@
 import { cn } from "@/lib/utils";
-import type { TransactionRow } from "@/services/triage";
+import type { ScoredTransaction } from "@/services/priority";
 import { StatusBadge } from "@/components/status-badge";
 import { STATUS_LABEL, statusTone, vnd } from "@/lib/format";
+
+const PRIORITY_FACTORS = [
+  {
+    key: "impact",
+    label: "Tác động",
+    color: "bg-[var(--t-blue-fg)]"
+  },
+  {
+    key: "urgency",
+    label: "Khẩn cấp",
+    color: "bg-[var(--t-amber-fg)]"
+  },
+  { key: "risk", label: "Rủi ro", color: "bg-[var(--t-red-fg)]" }
+] as const;
 
 /** Left-pane list of open transactions (already prioritized by the API). */
 export function InboxList({
@@ -9,7 +23,7 @@ export function InboxList({
   selectedId,
   onSelect
 }: {
-  items: TransactionRow[];
+  items: ScoredTransaction[];
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -25,6 +39,11 @@ export function InboxList({
       {items.map((t) => {
         const active = t.id === selectedId;
         const tone = statusTone(t.status);
+        const priorityPercent = Math.round(t.score * 100);
+        const priorityFactors = PRIORITY_FACTORS.map((factor) => ({
+          ...factor,
+          percent: Math.round(t.breakdown[factor.key] * 100)
+        }));
         return (
           <li key={t.id}>
             <button
@@ -54,10 +73,39 @@ export function InboxList({
                   {vnd(t.amount_minor, t.currency)}
                 </span>
               </div>
-              <div className="mt-2 flex items-center gap-2">
-                <StatusBadge tone={tone}>{STATUS_LABEL[t.status]}</StatusBadge>
-                <span className="text-xs font-medium text-muted-foreground">
+              <div className="mt-2 flex min-w-0 items-center gap-2">
+                <StatusBadge tone={tone} className="shrink-0 whitespace-nowrap">
+                  {STATUS_LABEL[t.status]}
+                </StatusBadge>
+                <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
                   {t.method}
+                </span>
+                <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-foreground">
+                    Ưu tiên {priorityPercent}%
+                  </span>
+                  <span className="flex gap-1" aria-hidden="true">
+                    {priorityFactors.map((factor) => (
+                      <span
+                        key={factor.key}
+                        title={`${factor.label}: ${factor.percent}%`}
+                        className="h-1.5 w-5 overflow-hidden rounded-full bg-muted"
+                      >
+                        <span
+                          className={cn(
+                            "block h-full rounded-full",
+                            factor.color
+                          )}
+                          style={{ width: `${factor.percent}%` }}
+                        />
+                      </span>
+                    ))}
+                  </span>
+                  <span className="sr-only">
+                    {priorityFactors
+                      .map((factor) => `${factor.label} ${factor.percent}%`)
+                      .join(", ")}
+                  </span>
                 </span>
               </div>
               {t.failure_reason && (

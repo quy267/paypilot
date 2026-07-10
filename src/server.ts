@@ -6,9 +6,10 @@ import {
   buildEvidence,
   decideResolution,
   getTransaction,
-  listInbox,
-  listResolutions
+  listResolutions,
+  queryInboxRows
 } from "./services/triage";
+import { rankInbox } from "./services/priority";
 import {
   SYSTEM_PROMPT,
   TRIAGE_MODEL_ID,
@@ -185,7 +186,11 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
   }
 
   if (pathname === "/api/inbox" && request.method === "GET") {
-    return json({ transactions: await listInbox(env.DB, 50) });
+    const rows = await queryInboxRows(env.DB);
+    // Rank all candidates on-the-fly, then return only the top slice (bounded payload).
+    return json({
+      transactions: rankInbox(rows, Math.floor(Date.now() / 1000)).slice(0, 50)
+    });
   }
 
   const txnMatch = pathname.match(/^\/api\/transactions\/([^/]+)$/);
