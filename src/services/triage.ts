@@ -31,6 +31,36 @@ export interface ResolutionRow {
   decided_at: number | null;
 }
 
+export interface DecisionRow {
+  resolution_id: string;
+  transaction_id: string;
+  merchant_id: string;
+  amount_minor: number;
+  currency: string;
+  txn_status: TransactionRow["status"];
+  proposed_action: ResolutionRow["proposed_action"];
+  confidence: number | null;
+  operator_decision: ResolutionRow["operator_decision"];
+  operator_id: string | null;
+  operator_note: string | null;
+  created_at: number;
+  decided_at: number | null;
+}
+
+export interface QueryDecisionsOptions {
+  decision?: ResolutionRow["operator_decision"];
+  q?: string;
+  limit: number;
+  offset: number;
+}
+
+export interface DecisionPage {
+  items: DecisionRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export type ProposedAction = "RETRY" | "ESCALATE" | "REFUND";
 export type Decision = "APPROVED" | "REJECTED";
 
@@ -132,6 +162,88 @@ export async function queryInboxRows(
     .bind(...bindings)
     .all<TransactionRow & { pending_confidence: number | null }>();
   return results ?? [];
+}
+
+const DECISION_QUERY_LIMIT_CAP = 5_000;
+
+/** Paginated resolution audit history joined with its transaction context. */
+export async function queryDecisions(
+  db: D1Database,
+  opts: QueryDecisionsOptions
+): Promise<DecisionPage> {
+  const filters: string[] = [];
+  const bindings: Array<string | number> = [];
+
+  if (opts.decision) {
+    bindings.push(opts.decision);
+    filters.push(`resolutions.operator_decision = ?${bindings.length}`);
+  }
+
+  const searchTerm = opts.q?.trim();
+  if (searchTerm) {
+    const escapedTerm = searchTerm.toLowerCase().replace(/[\\%_]/g, "\\$&");
+    bindings.push(`%${escapedTerm}%`);
+    const searchPlaceholder = `?${bindings.length}`;
+    filters.push(`(
+      LOWER(resolutions.transaction_id) LIKE ${searchPlaceholder} ESCAPE '\\'
+      OR LOWER(transactions.merchant_id) LIKE ${searchPlaceholder} ESCAPE '\\'
+      OR LOWER(COALESCE(resolutions.operator_note, '')) LIKE ${searchPlaceholder} ESCAPE '\\'
+    )`);
+  }
+
+  const whereClause = filters.length
+    ? `WHERE ${filters.join("\n         AND ")}`
+    : "";
+  const limit = Math.min(
+    Math.max(1, Math.trunc(opts.limit)),
+    DECISION_QUERY_LIMIT_CAP
+  );
+  const offset = Math.max(0, Math.trunc(opts.offset));
+
+  const countStatement = db.prepare(
+    `SELECT COUNT(*) AS total
+     FROM resolutions
+     INNER JOIN transactions ON transactions.id = resolutions.transaction_id
+     ${whereClause}`
+  );
+  const countRow = bindings.length
+    ? await countStatement.bind(...bindings).first<{ total: number }>()
+    : await countStatement.first<{ total: number }>();
+
+  const pageBindings = [...bindings, limit, offset];
+  const limitPlaceholder = `?${bindings.length + 1}`;
+  const offsetPlaceholder = `?${bindings.length + 2}`;
+  const { results } = await db
+    .prepare(
+      `SELECT resolutions.id AS resolution_id,
+              resolutions.transaction_id,
+              transactions.merchant_id,
+              transactions.amount_minor,
+              transactions.currency,
+              transactions.status AS txn_status,
+              resolutions.proposed_action,
+              resolutions.confidence,
+              resolutions.operator_decision,
+              resolutions.operator_id,
+              resolutions.operator_note,
+              resolutions.created_at,
+              resolutions.decided_at
+       FROM resolutions
+       INNER JOIN transactions ON transactions.id = resolutions.transaction_id
+       ${whereClause}
+       ORDER BY COALESCE(resolutions.decided_at, resolutions.created_at) DESC,
+                resolutions.id DESC
+       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`
+    )
+    .bind(...pageBindings)
+    .all<DecisionRow>();
+
+  return {
+    items: results ?? [],
+    total: countRow?.total ?? 0,
+    limit,
+    offset
+  };
 }
 
 export async function getTransaction(

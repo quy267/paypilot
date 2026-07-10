@@ -1,5 +1,21 @@
 import type { ResolutionRow, TransactionRow } from "@/services/triage";
 
+const vietnamDateTimeFormatter = new Intl.DateTimeFormat("vi-VN", {
+  timeZone: "Asia/Ho_Chi_Minh",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23"
+});
+
+/** Epoch seconds → Vietnamese local date and time. */
+export function formatEpochSeconds(epochSeconds: number): string {
+  return vietnamDateTimeFormatter.format(new Date(epochSeconds * 1_000));
+}
+
 /** Minor-unit integer → Vietnamese amount, e.g. 52000000 → "52.000.000 ₫". */
 export function vnd(minor: number, currency = "VND"): string {
   const grouped = Math.round(minor)

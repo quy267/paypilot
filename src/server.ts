@@ -2,16 +2,25 @@ import { createWorkersAI } from "workers-ai-provider";
 import { routeAgentRequest } from "agents";
 import { AIChatAgent, type OnChatMessageOptions } from "@cloudflare/ai-chat";
 import { convertToModelMessages, pruneMessages, streamText } from "ai";
+import { z } from "zod";
 import {
   buildEvidence,
   decideResolution,
   getTransaction,
   listResolutions,
+  queryDecisions,
   queryInboxRows
 } from "./services/triage";
 import { rankInbox } from "./services/priority";
 import { inboxQuerySchema, sortScoredInbox } from "./services/inbox-query";
 import { getStats } from "./services/stats";
+import { toCsv } from "./lib/csv";
+import {
+  ACTION_LABEL,
+  DECISION_LABEL,
+  formatEpochSeconds,
+  vnd
+} from "./lib/format";
 import {
   SYSTEM_PROMPT,
   TRIAGE_MODEL_ID,
@@ -54,6 +63,35 @@ export class TriageAgent extends AIChatAgent<Env> {
 const SESSION_COOKIE = "__Host-pp_session";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 const textEncoder = new TextEncoder();
+const integerDecisionQueryParam = z.string().regex(/^\d+$/).transform(Number);
+const decisionFilterShape = {
+  decision: z.enum(["APPROVED", "REJECTED", "PENDING"]).optional(),
+  q: z
+    .string()
+    .trim()
+    .max(100)
+    .transform((value) => value || undefined)
+    .optional()
+};
+const decisionsQuerySchema = z
+  .object({
+    ...decisionFilterShape,
+    limit: integerDecisionQueryParam
+      .pipe(z.number().int().min(1).max(100))
+      .optional(),
+    offset: integerDecisionQueryParam.pipe(z.number().int().min(0)).optional()
+  })
+  .transform((query) => ({
+    ...query,
+    limit: query.limit ?? 25,
+    offset: query.offset ?? 0
+  }));
+const decisionExportQuerySchema = z.object(decisionFilterShape);
+
+function excelSafeText(value: string | null): string | null {
+  if (value === null || !/^[=+\-@\t\r]/.test(value)) return value;
+  return `'${value}`;
+}
 
 function hex(buffer: ArrayBuffer): string {
   return Array.from(new Uint8Array(buffer), (byte) =>
@@ -222,6 +260,91 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
       total,
       limit,
       offset
+    });
+  }
+
+  if (pathname === "/api/decisions" && request.method === "GET") {
+    const parsedQuery = decisionsQuerySchema.safeParse(
+      Object.fromEntries(url.searchParams.entries())
+    );
+    if (!parsedQuery.success) {
+      return json(
+        {
+          error: "Tham số truy vấn không hợp lệ",
+          code: "invalid_query"
+        },
+        400
+      );
+    }
+
+    const { decision, q, limit, offset } = parsedQuery.data;
+    const page = await queryDecisions(env.DB, {
+      decision,
+      q,
+      limit,
+      offset
+    });
+    return json({
+      decisions: page.items,
+      total: page.total,
+      limit: page.limit,
+      offset: page.offset
+    });
+  }
+
+  if (pathname === "/api/export/decisions.csv" && request.method === "GET") {
+    const parsedQuery = decisionExportQuerySchema.safeParse(
+      Object.fromEntries(url.searchParams.entries())
+    );
+    if (!parsedQuery.success) {
+      return json(
+        {
+          error: "Tham số truy vấn không hợp lệ",
+          code: "invalid_query"
+        },
+        400
+      );
+    }
+
+    const page = await queryDecisions(env.DB, {
+      ...parsedQuery.data,
+      limit: 5_000,
+      offset: 0
+    });
+    const csv = toCsv(
+      [
+        "Thời điểm",
+        "Mã GD",
+        "Merchant",
+        "Số tiền",
+        "Hành động",
+        "Độ tự tin",
+        "Quyết định",
+        "Người duyệt",
+        "Ghi chú"
+      ],
+      page.items.map((decision) => [
+        formatEpochSeconds(decision.decided_at ?? decision.created_at),
+        excelSafeText(decision.transaction_id),
+        excelSafeText(decision.merchant_id),
+        vnd(decision.amount_minor, decision.currency),
+        decision.proposed_action
+          ? ACTION_LABEL[decision.proposed_action]
+          : null,
+        decision.confidence === null
+          ? null
+          : `${Math.round(decision.confidence * 100)}%`,
+        DECISION_LABEL[decision.operator_decision],
+        excelSafeText(decision.operator_id),
+        excelSafeText(decision.operator_note)
+      ])
+    );
+
+    return new Response(`\uFEFF${csv}`, {
+      headers: {
+        "content-type": "text/csv; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="paypilot-decisions.csv"'
+      }
     });
   }
 
