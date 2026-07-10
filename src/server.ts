@@ -11,6 +11,7 @@ import {
 } from "./services/triage";
 import { rankInbox } from "./services/priority";
 import { inboxQuerySchema, sortScoredInbox } from "./services/inbox-query";
+import { getStats } from "./services/stats";
 import {
   SYSTEM_PROMPT,
   TRIAGE_MODEL_ID,
@@ -185,6 +186,10 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
 
   if (pathname === "/api/me" && request.method === "GET") {
     return json({ authed: true });
+  }
+
+  if (pathname === "/api/stats" && request.method === "GET") {
+    return json(await getStats(env.DB, Math.floor(Date.now() / 1000)));
   }
 
   if (pathname === "/api/inbox" && request.method === "GET") {
