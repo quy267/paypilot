@@ -57,7 +57,7 @@ export function AppShell({
   children
 }: AppShellProps) {
   return (
-    <div className="flex h-screen overflow-hidden bg-background text-foreground">
+    <div className="flex h-screen overflow-hidden [contain:layout_paint] bg-background text-foreground">
       <aside className="flex w-56 shrink-0 flex-col border-r bg-card">
         <div className="flex h-16 items-center gap-2.5 border-b px-5">
           <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
