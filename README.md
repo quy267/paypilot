@@ -87,13 +87,13 @@ Trước khi triển khai code mới, bảng `users` trong `schema.sql` phải t
 npx wrangler d1 execute paypilot-db --remote --file schema.sql
 ```
 
-Để bootstrap admin đầu tiên, chạy lệnh sau và nhập mật khẩu khi được hỏi; có thể đặt biến môi trường `PAYPILOT_ADMIN_PASSWORD` thay cho prompt:
+Để bootstrap admin đầu tiên, chạy lệnh sau và nhập mật khẩu khi được hỏi; có thể đặt biến môi trường `PAYPILOT_ADMIN_PASSWORD` thay cho prompt. Script sẽ ghi câu lệnh INSERT vào một file `.sql` tạm:
 
 ```bash
 node scripts/make-admin.mjs <username>
 ```
 
-Sau đó chạy chính xác lệnh `wrangler d1 execute paypilot-db --remote --command "..."` mà script in ra. Khi đã đăng nhập bằng admin, tạo thêm tài khoản operator hoặc viewer trong màn hình **Quản lý user**.
+Sau đó chạy lệnh `npx wrangler d1 execute paypilot-db --remote --file <đường-dẫn-file-tạm>` mà script in ra. Khi lệnh thành công, xóa file tạm bằng lệnh `rm <đường-dẫn-file-tạm>` được in kèm vì file chứa password hash. Khi đã đăng nhập bằng admin, tạo thêm tài khoản operator hoặc viewer trong màn hình **Quản lý user**.
 
 Mật khẩu được băm bằng PBKDF2 với 100.000 vòng lặp. Phiên đăng nhập chứa role đã ký trong cookie tiền tố `__Host-`, có thuộc tính HttpOnly, Secure, SameSite=Strict và thời hạn 7 ngày; role và trạng thái disabled vẫn được kiểm tra lại từ DB ở mỗi request. Hệ thống chủ đích chưa có MFA, lockout hoặc password policy. Xoay `OWNER_KEY` sẽ vô hiệu hóa toàn bộ session hiện có.
 

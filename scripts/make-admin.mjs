@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 
 const PBKDF2_ITERATIONS = 100_000;
@@ -35,10 +38,6 @@ function bytesToHex(bytes) {
 
 function sqlString(value) {
   return `'${value.replaceAll("'", "''")}'`;
-}
-
-function shellString(value) {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 const [, , username, displayName] = process.argv;
@@ -82,9 +81,16 @@ if (!username) {
       "INSERT INTO users " +
       "(id, username, display_name, password_hash, password_salt, password_iterations, role, disabled, created_at) " +
       `VALUES (${sqlString(id)}, ${sqlString(username)}, ${displayNameSql}, ${sqlString(hash)}, ${sqlString(salt)}, ${PBKDF2_ITERATIONS}, 'admin', 0, ${createdAt});`;
-
-    console.log(
-      `npx wrangler d1 execute paypilot-db --remote --command ${shellString(statement)}`
+    const sqlFile = join(
+      tmpdir(),
+      `paypilot-admin-${username}-${Date.now()}.sql`
     );
+
+    writeFileSync(sqlFile, `${statement}\n`);
+    console.log(`Wrote admin INSERT to ${sqlFile}`);
+    console.log(
+      `npx wrangler d1 execute paypilot-db --remote --file ${sqlFile}`
+    );
+    console.log(`# after it succeeds, delete the temp file: rm ${sqlFile}`);
   }
 }
