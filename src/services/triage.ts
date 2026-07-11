@@ -94,7 +94,7 @@ export async function createTransaction(
   input: CreateTransactionInput
 ): Promise<TransactionRow> {
   const transaction: TransactionRow = {
-    id: `txn_${crypto.randomUUID().slice(0, 12)}`,
+    id: `txn_${crypto.randomUUID()}`,
     merchant_id: input.merchant_id,
     gateway_ref: input.gateway_ref ?? null,
     amount_minor: input.amount_minor,
@@ -127,29 +127,6 @@ export async function createTransaction(
     .run();
 
   return transaction;
-}
-
-/**
- * Open items for the inbox, prioritized: FLAGGED first (review risk), then FAILED,
- * then PENDING; within a status, largest amount first, then newest.
- * Uses idx_transactions_inbox(status, created_at).
- */
-export async function listInbox(
-  db: D1Database,
-  limit = 50
-): Promise<TransactionRow[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT * FROM transactions
-       WHERE status IN ('FAILED','FLAGGED','PENDING')
-       ORDER BY CASE status WHEN 'FLAGGED' THEN 0 WHEN 'FAILED' THEN 1 ELSE 2 END,
-                amount_minor DESC,
-                created_at DESC
-       LIMIT ?`
-    )
-    .bind(limit)
-    .all<TransactionRow>();
-  return results ?? [];
 }
 
 /**
@@ -385,7 +362,7 @@ export async function proposeResolution(
     };
   }
 
-  const id = `res_${crypto.randomUUID().slice(0, 12)}`;
+  const id = `res_${crypto.randomUUID()}`;
   const evidenceJson =
     typeof input.evidence === "string"
       ? input.evidence

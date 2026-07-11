@@ -14,7 +14,12 @@ const PRIORITY_FACTORS = [
     label: "Khẩn cấp",
     color: "bg-[var(--t-amber-fg)]"
   },
-  { key: "risk", label: "Rủi ro", color: "bg-[var(--t-red-fg)]" }
+  { key: "risk", label: "Rủi ro", color: "bg-[var(--t-red-fg)]" },
+  {
+    key: "confidence",
+    label: "Độ tin cậy",
+    color: "bg-[var(--t-green-fg)]"
+  }
 ] as const;
 
 /** Left-pane list of open transactions (already prioritized by the API). */

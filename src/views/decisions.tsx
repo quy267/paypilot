@@ -144,12 +144,12 @@ export function DecisionsView() {
 
   const exportHref = useMemo(() => {
     const params = new URLSearchParams();
-    const exportQuery = searchInput.trim();
+    const exportQuery = debouncedQuery;
     if (decisionFilter) params.set("decision", decisionFilter);
     if (exportQuery) params.set("q", exportQuery);
     const queryString = params.toString();
     return `/api/export/decisions.csv${queryString ? `?${queryString}` : ""}`;
-  }, [decisionFilter, searchInput]);
+  }, [decisionFilter, debouncedQuery]);
 
   const changeDecisionFilter = useCallback((decision: DecisionFilter) => {
     setDecisionFilter(decision);

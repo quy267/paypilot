@@ -70,6 +70,7 @@ export function InboxView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
   const [deciding, setDeciding] = useState(false);
+  const [decideError, setDecideError] = useState(false);
   const [followUp, setFollowUp] = useState("");
   const [addTransactionOpen, setAddTransactionOpen] = useState(false);
   const wasStreaming = useRef(false);
@@ -203,15 +204,17 @@ export function InboxView() {
 
   const select = useCallback(
     (id: string) => {
+      stop();
       // Cancel any in-flight triage poll tied to the previously selected txn.
       activeTriageId.current = null;
       setTriaging(false);
+      setFollowUp("");
       setSelectedId(id);
       setDetail(null);
       clearHistory();
       refreshDetail(id);
     },
-    [clearHistory, refreshDetail]
+    [clearHistory, refreshDetail, stop]
   );
 
   const changeStatusFilter = useCallback((status: InboxStatusFilter) => {
@@ -284,16 +287,19 @@ export function InboxView() {
       note?: string
     ) => {
       setDeciding(true);
+      setDecideError(false);
       try {
-        await fetch(`/api/resolutions/${resolutionId}/decide`, {
+        const res = await fetch(`/api/resolutions/${resolutionId}/decide`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ decision, note })
         });
+        if (!res.ok) throw new Error(`Decide failed (${res.status})`);
         if (selectedId) await refreshDetail(selectedId);
         await latestRefreshInbox.current();
       } catch (e) {
         console.error("Failed to record decision:", e);
+        setDecideError(true);
       } finally {
         setDeciding(false);
       }
@@ -426,12 +432,19 @@ export function InboxView() {
             <TransactionDetail txn={txn} />
 
             {latestResolution ? (
-              <ResolutionCard
-                key={latestResolution.id}
-                resolution={latestResolution}
-                onDecide={decide}
-                deciding={deciding}
-              />
+              <div className="space-y-2">
+                <ResolutionCard
+                  key={latestResolution.id}
+                  resolution={latestResolution}
+                  onDecide={decide}
+                  deciding={deciding}
+                />
+                {decideError && (
+                  <p role="alert" className="text-xs text-[var(--t-red-fg)]">
+                    Không thể lưu quyết định. Vui lòng thử lại.
+                  </p>
+                )}
+              </div>
             ) : (
               <div className="flex items-center justify-between gap-3 rounded-xl border bg-card p-4 shadow-card">
                 <p className="text-sm text-muted-foreground">
