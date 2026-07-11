@@ -7,34 +7,39 @@ interface LoginScreenProps {
 }
 
 export function LoginScreen({ onAuthed }: LoginScreenProps) {
-  const [key, setKey] = useState("");
-  const [error, setError] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const submit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       setSubmitting(true);
-      setError(false);
+      setError(null);
       try {
         const res = await fetch("/api/login", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ key })
+          body: JSON.stringify({ username, password })
         });
         if (res.ok) {
           onAuthed();
           return;
         }
-        if (res.status === 401) setError(true);
+        setError(
+          res.status === 401
+            ? "Sai tên đăng nhập hoặc mật khẩu"
+            : "Không đăng nhập được, vui lòng thử lại"
+        );
       } catch (e) {
         console.error("Failed to log in:", e);
-        setError(true);
+        setError("Không đăng nhập được, vui lòng thử lại");
       } finally {
         setSubmitting(false);
       }
     },
-    [key, onAuthed]
+    [onAuthed, password, username]
   );
 
   return (
@@ -48,21 +53,38 @@ export function LoginScreen({ onAuthed }: LoginScreenProps) {
             <div className="space-y-2">
               <label
                 className="text-sm font-medium text-card-foreground"
-                htmlFor="owner-key"
+                htmlFor="username"
+              >
+                Tên đăng nhập
+              </label>
+              <input
+                id="username"
+                type="text"
+                aria-label="Tên đăng nhập"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                autoComplete="username"
+              />
+            </div>
+            <div className="space-y-2">
+              <label
+                className="text-sm font-medium text-card-foreground"
+                htmlFor="password"
               >
                 Mật khẩu
               </label>
               <input
-                id="owner-key"
+                id="password"
                 type="password"
                 aria-label="Mật khẩu"
-                value={key}
-                onChange={(event) => setKey(event.target.value)}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 autoComplete="current-password"
               />
             </div>
-            {error && <p className="text-sm text-destructive">Sai mật khẩu</p>}
+            {error && <p className="text-sm text-destructive">{error}</p>}
             <Button className="w-full" type="submit" disabled={submitting}>
               Đăng nhập
             </Button>

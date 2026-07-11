@@ -79,6 +79,20 @@ export async function getUserAuthByUsername(
     .first<UserAuthRow>();
 }
 
+export async function getUserById(
+  db: D1Database,
+  id: string
+): Promise<PublicUserRow | null> {
+  return db
+    .prepare(
+      `SELECT ${PUBLIC_COLUMNS}
+       FROM users
+       WHERE id = ?1`
+    )
+    .bind(id)
+    .first<PublicUserRow>();
+}
+
 export async function createUser(
   db: D1Database,
   input: CreateUserInput

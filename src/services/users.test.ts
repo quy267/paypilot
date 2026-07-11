@@ -8,6 +8,7 @@ import {
   countAdmins,
   createUser,
   getUserAuthByUsername,
+  getUserById,
   listUsers,
   updateUser
 } from "./users";
@@ -66,6 +67,7 @@ describe("users service", () => {
       display_name: "Minh Nguyen"
     });
     const auth = await getUserAuthByUsername(db, "minh");
+    const publicUser = await getUserById(db, created.id);
 
     expect(created).toMatchObject({
       username: "minh",
@@ -74,6 +76,8 @@ describe("users service", () => {
       disabled: 0
     });
     expect(created).not.toHaveProperty("password_hash");
+    expect(publicUser).toEqual(created);
+    expect(publicUser).not.toHaveProperty("password_hash");
     expect(auth).toMatchObject({ id: created.id, username: "minh" });
     expect(auth?.password_hash).toMatch(/^[0-9a-f]{64}$/);
     await expect(

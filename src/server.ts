@@ -16,7 +16,14 @@ import { rankInbox } from "./services/priority";
 import { inboxQuerySchema, sortScoredInbox } from "./services/inbox-query";
 import { getStats } from "./services/stats";
 import { toCsv } from "./lib/csv";
-import { constantTimeEqual } from "./lib/crypto-compare";
+import { verifyPassword } from "./lib/password";
+import {
+  SESSION_MAX_AGE_SECONDS,
+  signSession,
+  verifySession,
+  type SessionIdentity
+} from "./lib/session";
+import { getUserAuthByUsername, getUserById } from "./services/users";
 import {
   ACTION_LABEL,
   DECISION_LABEL,
@@ -63,8 +70,6 @@ export class TriageAgent extends AIChatAgent<Env> {
 }
 
 const SESSION_COOKIE = "__Host-pp_session";
-const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
-const textEncoder = new TextEncoder();
 const integerDecisionQueryParam = z.string().regex(/^\d+$/).transform(Number);
 const decisionFilterShape = {
   decision: z.enum(["APPROVED", "REJECTED", "PENDING"]).optional(),
@@ -99,31 +104,19 @@ const createTransactionSchema = z.object({
   failure_code: z.string().max(255).optional(),
   failure_reason: z.string().max(255).optional()
 });
+const loginSchema = z.object({
+  username: z.string(),
+  password: z.string()
+});
+// Valid PBKDF2 record used only to equalize missing/disabled-user login cost.
+const DUMMY_PASSWORD_SALT = "728ef3ce65a00fb5deae456388791c44";
+const DUMMY_PASSWORD_HASH =
+  "41477ec01a4b7cf68dbd31ca36ee2a054d0e5dc2fee2695ba9925b97c701e87a";
+const DUMMY_PASSWORD_ITERATIONS = 100_000;
 
 function excelSafeText(value: string | null): string | null {
   if (value === null || !/^[=+\-@\t\r]/.test(value)) return value;
   return `'${value}`;
-}
-
-function hex(buffer: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buffer), (byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
-}
-
-async function hmacHex(secret: string, value: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    textEncoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  return hex(await crypto.subtle.sign("HMAC", key, textEncoder.encode(value)));
-}
-
-async function sha256Hex(value: string): Promise<string> {
-  return hex(await crypto.subtle.digest("SHA-256", textEncoder.encode(value)));
 }
 
 function getCookie(request: Request, name: string): string | null {
@@ -138,30 +131,13 @@ function getCookie(request: Request, name: string): string | null {
   return null;
 }
 
-async function sessionToken(env: Env): Promise<string> {
-  const exp = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS;
-  const expString = String(exp);
-  return `${expString}.${await hmacHex(env.OWNER_KEY, expString)}`;
-}
-
-async function isAuthed(request: Request, env: Env): Promise<boolean> {
+async function getSession(
+  request: Request,
+  env: Env
+): Promise<SessionIdentity | null> {
   const token = getCookie(request, SESSION_COOKIE);
-  if (!token) return false;
-
-  const dotAt = token.indexOf(".");
-  if (dotAt <= 0 || dotAt === token.length - 1) return false;
-
-  const expString = token.slice(0, dotAt);
-  const cookieHmac = token.slice(dotAt + 1);
-  if (!/^\d+$/.test(expString)) return false;
-
-  const exp = Number(expString);
-  if (!Number.isSafeInteger(exp) || exp <= Math.floor(Date.now() / 1000)) {
-    return false;
-  }
-
-  const expectedHmac = await hmacHex(env.OWNER_KEY, expString);
-  return constantTimeEqual(expectedHmac, cookieHmac);
+  if (!token) return null;
+  return verifySession(env.OWNER_KEY, token, Math.floor(Date.now() / 1000));
 }
 
 function sameOrigin(request: Request): boolean {
@@ -171,15 +147,6 @@ function sameOrigin(request: Request): boolean {
   if (!origin) return false;
   const url = new URL(request.url);
   return origin === `https://${url.host}` || origin === "http://localhost:5173";
-}
-
-async function hasOwnerKey(key: unknown, env: Env): Promise<boolean> {
-  const submittedKey = typeof key === "string" ? key : "";
-  const [submittedHash, ownerHash] = await Promise.all([
-    sha256Hex(submittedKey),
-    sha256Hex(env.OWNER_KEY)
-  ]);
-  return constantTimeEqual(submittedHash, ownerHash);
 }
 
 /**
@@ -203,19 +170,61 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
   if (!pathname.startsWith("/api/")) return null;
 
   const isLogin = pathname === "/api/login" && request.method === "POST";
-  if (!isLogin && !(await isAuthed(request, env))) {
+  const session = isLogin ? null : await getSession(request, env);
+  if (!isLogin && !session) {
     return json({ error: "unauthorized" }, 401);
   }
 
   if (isLogin) {
     if (!sameOrigin(request)) return json({ error: "forbidden" }, 403);
-    const body = (await request.json().catch(() => ({}))) as { key?: unknown };
-    if (!(await hasOwnerKey(body.key, env))) {
+    const body: unknown = await request.json().catch(() => ({}));
+    const parsedBody = loginSchema.safeParse(body);
+    if (!parsedBody.success) {
       return json({ error: "unauthorized" }, 401);
     }
-    return json({ ok: true }, 200, {
-      "Set-Cookie": `${SESSION_COOKIE}=${await sessionToken(env)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}`
-    });
+
+    const user = await getUserAuthByUsername(env.DB, parsedBody.data.username);
+    let passwordMatches = false;
+    if (!user || user.disabled !== 0) {
+      await verifyPassword(
+        parsedBody.data.password,
+        DUMMY_PASSWORD_SALT,
+        DUMMY_PASSWORD_HASH,
+        DUMMY_PASSWORD_ITERATIONS
+      );
+    } else {
+      passwordMatches = await verifyPassword(
+        parsedBody.data.password,
+        user.password_salt,
+        user.password_hash,
+        user.password_iterations
+      );
+    }
+
+    if (!user || user.disabled !== 0 || !passwordMatches) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const token = await signSession(
+      env.OWNER_KEY,
+      { userId: user.id, role: user.role },
+      nowSeconds
+    );
+    return json(
+      {
+        ok: true,
+        user: {
+          username: user.username,
+          display_name: user.display_name,
+          role: user.role
+        }
+      },
+      200,
+      {
+        "Set-Cookie": `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}`
+      }
+    );
   }
 
   if (pathname === "/api/logout" && request.method === "POST") {
@@ -226,7 +235,16 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
   }
 
   if (pathname === "/api/me" && request.method === "GET") {
-    return json({ authed: true });
+    if (!session) return json({ error: "unauthorized" }, 401);
+    const user = await getUserById(env.DB, session.userId);
+    if (!user || user.disabled !== 0) {
+      return json({ error: "unauthorized" }, 401);
+    }
+    return json({
+      username: user.username,
+      display_name: user.display_name,
+      role: user.role
+    });
   }
 
   if (pathname === "/api/stats" && request.method === "GET") {
@@ -411,11 +429,11 @@ export default {
     return (
       (await routeAgentRequest(request, env, {
         onBeforeConnect: async (req) =>
-          (await isAuthed(req, env)) && sameOrigin(req)
+          (await getSession(req, env)) && sameOrigin(req)
             ? undefined
             : new Response("unauthorized", { status: 401 }),
         onBeforeRequest: async (req) =>
-          (await isAuthed(req, env))
+          (await getSession(req, env))
             ? undefined
             : new Response("unauthorized", { status: 401 })
       })) || new Response("Not found", { status: 404 })
