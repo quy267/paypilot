@@ -216,6 +216,7 @@ export function InboxView({ canWrite }: { canWrite: boolean }) {
       // Cancel any in-flight triage poll tied to the previously selected txn.
       activeTriageId.current = null;
       setTriaging(false);
+      setDecideError(false);
       setFollowUp("");
       setSelectedId(id);
       setDetail(null);

@@ -73,6 +73,32 @@ sqlite3 /tmp/paypilot.db ".read schema.sql" ".read seed.sql" \
   "SELECT status, COUNT(*) FROM transactions GROUP BY status;"
 ```
 
+## Authentication & roles (RBAC)
+
+PayPilot có ba vai trò:
+
+- **admin**: toàn quyền, bao gồm quản lý user.
+- **operator**: triage, duyệt/từ chối, thêm giao dịch và xuất dữ liệu.
+- **viewer**: chỉ xem và xuất dữ liệu.
+
+Trước khi triển khai code mới, bảng `users` trong `schema.sql` phải tồn tại trên D1. Luôn migrate D1 **trước** khi deploy code:
+
+```bash
+npx wrangler d1 execute paypilot-db --remote --file schema.sql
+```
+
+Để bootstrap admin đầu tiên, chạy lệnh sau và nhập mật khẩu khi được hỏi; có thể đặt biến môi trường `PAYPILOT_ADMIN_PASSWORD` thay cho prompt:
+
+```bash
+node scripts/make-admin.mjs <username>
+```
+
+Sau đó chạy chính xác lệnh `wrangler d1 execute paypilot-db --remote --command "..."` mà script in ra. Khi đã đăng nhập bằng admin, tạo thêm tài khoản operator hoặc viewer trong màn hình **Quản lý user**.
+
+Mật khẩu được băm bằng PBKDF2 với 100.000 vòng lặp. Phiên đăng nhập chứa role đã ký trong cookie tiền tố `__Host-`, có thuộc tính HttpOnly, Secure, SameSite=Strict và thời hạn 7 ngày; role và trạng thái disabled vẫn được kiểm tra lại từ DB ở mỗi request. Hệ thống chủ đích chưa có MFA, lockout hoặc password policy. Xoay `OWNER_KEY` sẽ vô hiệu hóa toàn bộ session hiện có.
+
+Giới hạn đã biết: guard bảo vệ admin cuối cùng không atomic khi có thao tác đồng thời. Nếu mất admin cuối cùng, khôi phục bằng `scripts/make-admin.mjs`.
+
 ## Đánh giá AI
 
 Bộ đánh giá đo độ chính xác của model khi triage ≥ 10 tình huống dựa trên dữ liệu mẫu. Nó chạy **ngoài** Durable Object/WebSocket: dựng một D1 trong bộ nhớ (miniflare) từ `schema.sql` + `seed.sql`, rồi gọi đúng system prompt + bộ công cụ mà agent thật dùng (định nghĩa dùng chung trong `src/agent/triage-core.ts`).

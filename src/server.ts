@@ -117,15 +117,15 @@ const createTransactionSchema = z.object({
   failure_reason: z.string().max(255).optional()
 });
 const loginSchema = z.object({
-  username: z.string().min(1).max(64),
+  username: z.string().trim().min(1).max(64),
   password: z.string().min(1).max(200)
 });
 const userRoleSchema = z.enum(["admin", "operator", "viewer"]);
 const createUserSchema = z.object({
-  username: z.string().min(1).max(64),
+  username: z.string().trim().min(1).max(64),
   password: z.string().min(1).max(200),
   role: userRoleSchema,
-  display_name: z.string().max(64).optional()
+  display_name: z.string().trim().max(64).optional()
 });
 const updateUserSchema = z
   .object({
@@ -146,7 +146,7 @@ const DUMMY_PASSWORD_HASH =
 const DUMMY_PASSWORD_ITERATIONS = 100_000;
 
 function excelSafeText(value: string | null): string | null {
-  if (value === null || !/^[=+\-@\t\r]/.test(value)) return value;
+  if (value === null || !/^\s*[=+\-@\t\r]/.test(value)) return value;
   return `'${value}`;
 }
 

@@ -10,6 +10,7 @@
 --   FLAGGED x3 (nghi ngờ: số tiền lớn bất thường, nghi trùng, giao dịch dồn dập)
 --   PENDING x2 (kẹt chưa kết thúc)
 --   SUCCESS x3 (để tương phản khi lọc inbox)
+-- Users được bootstrap qua scripts/make-admin.mjs và quản lý trong ứng dụng.
 
 INSERT INTO transactions
   (id, merchant_id, gateway_ref, amount_minor, currency, method, status, failure_code, failure_reason, created_at)
