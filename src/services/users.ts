@@ -2,6 +2,12 @@ import { hashPassword } from "../lib/password";
 
 export type UserRole = "admin" | "operator" | "viewer";
 
+const WRITE_ROLES: ReadonlySet<UserRole> = new Set(["admin", "operator"]);
+
+export function canWrite(role: UserRole): boolean {
+  return WRITE_ROLES.has(role);
+}
+
 export interface PublicUserRow {
   id: string;
   username: string;

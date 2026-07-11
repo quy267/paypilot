@@ -23,7 +23,12 @@ import {
   verifySession,
   type SessionIdentity
 } from "./lib/session";
-import { getUserAuthByUsername, getUserById } from "./services/users";
+import {
+  canWrite,
+  getUserAuthByUsername,
+  getUserById,
+  type PublicUserRow
+} from "./services/users";
 import {
   ACTION_LABEL,
   DECISION_LABEL,
@@ -105,8 +110,8 @@ const createTransactionSchema = z.object({
   failure_reason: z.string().max(255).optional()
 });
 const loginSchema = z.object({
-  username: z.string(),
-  password: z.string()
+  username: z.string().min(1).max(64),
+  password: z.string().min(1).max(200)
 });
 // Valid PBKDF2 record used only to equalize missing/disabled-user login cost.
 const DUMMY_PASSWORD_SALT = "728ef3ce65a00fb5deae456388791c44";
@@ -140,6 +145,17 @@ async function getSession(
   return verifySession(env.OWNER_KEY, token, Math.floor(Date.now() / 1000));
 }
 
+function ensureActiveWriter(
+  account: PublicUserRow | null
+): { ok: true } | { ok: false; status: 401 | 403 } {
+  if (!account || account.disabled !== 0) {
+    return { ok: false, status: 401 };
+  }
+  if (!canWrite(account.role)) return { ok: false, status: 403 };
+
+  return { ok: true };
+}
+
 function sameOrigin(request: Request): boolean {
   const origin = request.headers.get("Origin");
   // Only state-changing POSTs and the WS upgrade call this, and browsers always send
@@ -171,7 +187,8 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
 
   const isLogin = pathname === "/api/login" && request.method === "POST";
   const session = isLogin ? null : await getSession(request, env);
-  if (!isLogin && !session) {
+  const account = session ? await getUserById(env.DB, session.userId) : null;
+  if (!isLogin && (!session || !account || account.disabled !== 0)) {
     return json({ error: "unauthorized" }, 401);
   }
 
@@ -235,15 +252,11 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
   }
 
   if (pathname === "/api/me" && request.method === "GET") {
-    if (!session) return json({ error: "unauthorized" }, 401);
-    const user = await getUserById(env.DB, session.userId);
-    if (!user || user.disabled !== 0) {
-      return json({ error: "unauthorized" }, 401);
-    }
+    if (!account) return json({ error: "unauthorized" }, 401);
     return json({
-      username: user.username,
-      display_name: user.display_name,
-      role: user.role
+      username: account.username,
+      display_name: account.display_name,
+      role: account.role
     });
   }
 
@@ -286,6 +299,13 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
 
   if (pathname === "/api/transactions" && request.method === "POST") {
     if (!sameOrigin(request)) return json({ error: "forbidden" }, 403);
+    const gate = ensureActiveWriter(account);
+    if (!gate.ok) {
+      return json(
+        { error: gate.status === 403 ? "forbidden" : "unauthorized" },
+        gate.status
+      );
+    }
     const body: unknown = await request.json().catch(() => ({}));
     const parsedBody = createTransactionSchema.safeParse(body);
     if (!parsedBody.success) {
@@ -402,6 +422,14 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
   const decideMatch = pathname.match(/^\/api\/resolutions\/([^/]+)\/decide$/);
   if (decideMatch && request.method === "POST") {
     if (!sameOrigin(request)) return json({ error: "forbidden" }, 403);
+    const gate = ensureActiveWriter(account);
+    if (!gate.ok) {
+      return json(
+        { error: gate.status === 403 ? "forbidden" : "unauthorized" },
+        gate.status
+      );
+    }
+    if (!session) return json({ error: "unauthorized" }, 401);
     const id = decodeURIComponent(decideMatch[1]);
     const body = (await request.json().catch(() => ({}))) as {
       decision?: string;
@@ -413,7 +441,7 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
     const res = await decideResolution(env.DB, {
       resolution_id: id,
       decision: body.decision,
-      operator_id: "owner",
+      operator_id: session.userId,
       note: body.note
     });
     return json(res, res.ok ? 200 : 400);
@@ -428,14 +456,34 @@ export default {
     if (apiResponse) return apiResponse;
     return (
       (await routeAgentRequest(request, env, {
-        onBeforeConnect: async (req) =>
-          (await getSession(req, env)) && sameOrigin(req)
+        onBeforeConnect: async (req) => {
+          const session = await getSession(req, env);
+          if (!session || !sameOrigin(req)) {
+            return new Response("unauthorized", { status: 401 });
+          }
+
+          const account = await getUserById(env.DB, session.userId);
+          const gate = ensureActiveWriter(account);
+          return gate.ok
             ? undefined
-            : new Response("unauthorized", { status: 401 }),
-        onBeforeRequest: async (req) =>
-          (await getSession(req, env))
+            : new Response(gate.status === 403 ? "forbidden" : "unauthorized", {
+                status: gate.status
+              });
+        },
+        onBeforeRequest: async (req) => {
+          const session = await getSession(req, env);
+          if (!session) {
+            return new Response("unauthorized", { status: 401 });
+          }
+
+          const account = await getUserById(env.DB, session.userId);
+          const gate = ensureActiveWriter(account);
+          return gate.ok
             ? undefined
-            : new Response("unauthorized", { status: 401 })
+            : new Response(gate.status === 403 ? "forbidden" : "unauthorized", {
+                status: gate.status
+              });
+        }
       })) || new Response("Not found", { status: 404 })
     );
   }

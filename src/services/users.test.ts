@@ -5,6 +5,7 @@ import { verifyPassword } from "../lib/password";
 import {
   DuplicateUsernameError,
   WeakPasswordError,
+  canWrite,
   countAdmins,
   createUser,
   getUserAuthByUsername,
@@ -12,6 +13,16 @@ import {
   listUsers,
   updateUser
 } from "./users";
+
+describe("canWrite", () => {
+  it.each([
+    ["admin", true],
+    ["operator", true],
+    ["viewer", false]
+  ] as const)("canWrite(%s) returns %s", (role, expected) => {
+    expect(canWrite(role)).toBe(expected);
+  });
+});
 
 function asD1Database(sqlite: DatabaseSync): D1Database {
   return {
