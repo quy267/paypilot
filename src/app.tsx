@@ -61,7 +61,7 @@ function AuthenticatedApp({
         }
       >
         <div className={route === "inbox" ? "h-full" : "hidden h-full"}>
-          <InboxView />
+          <InboxView canWrite={currentUser.role !== "viewer"} />
         </div>
         {route === "dashboard" && <DashboardView />}
         {route === "decisions" && <DecisionsView />}

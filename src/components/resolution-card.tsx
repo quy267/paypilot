@@ -15,7 +15,8 @@ import { ACTION_LABEL, DECISION_LABEL, decisionTone } from "@/lib/format";
 export function ResolutionCard({
   resolution,
   onDecide,
-  deciding
+  deciding,
+  canDecide
 }: {
   resolution: ResolutionRow;
   onDecide: (
@@ -24,6 +25,7 @@ export function ResolutionCard({
     note?: string
   ) => void;
   deciding: boolean;
+  canDecide: boolean;
 }) {
   const [note, setNote] = useState("");
   const pending = resolution.operator_decision === "PENDING";
@@ -73,7 +75,7 @@ export function ResolutionCard({
         )}
       </div>
 
-      {pending ? (
+      {pending && canDecide ? (
         <div className="space-y-3">
           <Textarea
             value={note}
@@ -103,14 +105,14 @@ export function ResolutionCard({
             </Button>
           </div>
         </div>
-      ) : (
+      ) : !pending ? (
         (resolution.operator_id || resolution.operator_note) && (
           <p className="text-xs text-muted-foreground">
             {resolution.operator_id ? `Bởi ${resolution.operator_id}` : ""}
             {resolution.operator_note ? ` — ${resolution.operator_note}` : ""}
           </p>
         )
-      )}
+      ) : null}
     </div>
   );
 }

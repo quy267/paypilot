@@ -51,7 +51,7 @@ function isInboxResponse(value: unknown): value is InboxResponse {
 
 const INBOX_PAGE_LIMIT = 25;
 
-export function InboxView() {
+export function InboxView({ canWrite }: { canWrite: boolean }) {
   const [connected, setConnected] = useState(false);
   const [inbox, setInbox] = useState<ScoredTransaction[]>([]);
   const [inboxPage, setInboxPage] = useState({
@@ -182,6 +182,14 @@ export function InboxView() {
   );
 
   useEffect(() => {
+    if (canWrite) return;
+    activeTriageId.current = null;
+    setTriaging(false);
+    setAddTransactionOpen(false);
+    stop();
+  }, [canWrite, stop]);
+
+  useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       setInboxOffset(0);
       setDebouncedQuery(searchInput.trim());
@@ -241,7 +249,7 @@ export function InboxView() {
   }, [inboxPage.limit, inboxPage.offset]);
 
   const processWithAI = useCallback(async () => {
-    if (!selectedId || triaging) return;
+    if (!canWrite || !selectedId || triaging) return;
     const id = selectedId;
     activeTriageId.current = id;
     setTriaging(true);
@@ -278,7 +286,7 @@ export function InboxView() {
       if (activeTriageId.current === id) setTriaging(false);
       latestRefreshInbox.current();
     }
-  }, [selectedId, triaging, clearHistory, sendMessage]);
+  }, [canWrite, selectedId, triaging, clearHistory, sendMessage]);
 
   const decide = useCallback(
     async (
@@ -286,6 +294,7 @@ export function InboxView() {
       decision: "APPROVED" | "REJECTED",
       note?: string
     ) => {
+      if (!canWrite) return;
       setDeciding(true);
       setDecideError(false);
       try {
@@ -304,7 +313,7 @@ export function InboxView() {
         setDeciding(false);
       }
     },
-    [selectedId, refreshDetail]
+    [canWrite, selectedId, refreshDetail]
   );
 
   const sendFollowUp = useCallback(() => {
@@ -315,8 +324,9 @@ export function InboxView() {
   }, [followUp, triaging, sendMessage]);
 
   const openAddTransaction = useCallback(() => {
+    if (!canWrite) return;
     setAddTransactionOpen(true);
-  }, []);
+  }, [canWrite]);
 
   const closeAddTransaction = useCallback(() => {
     setAddTransactionOpen(false);
@@ -339,27 +349,31 @@ export function InboxView() {
             <div className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
               Cần xử lý ({inboxPage.total})
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              onClick={openAddTransaction}
-              aria-haspopup="dialog"
-              aria-expanded={addTransactionOpen}
-            >
-              Thêm giao dịch
-            </Button>
+            {canWrite && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={openAddTransaction}
+                aria-haspopup="dialog"
+                aria-expanded={addTransactionOpen}
+              >
+                Thêm giao dịch
+              </Button>
+            )}
           </div>
           <div className="mt-1 flex items-center justify-end gap-1">
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span
-                className={cn(
-                  "size-2 rounded-full",
-                  connected ? "dot-green" : "dot-red"
-                )}
-              />
-              {connected ? "Đã kết nối" : "Mất kết nối"}
-            </span>
+            {canWrite && (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span
+                  className={cn(
+                    "size-2 rounded-full",
+                    connected ? "dot-green" : "dot-red"
+                  )}
+                />
+                {connected ? "Đã kết nối" : "Mất kết nối"}
+              </span>
+            )}
             <Button
               variant="ghost"
               size="icon-xs"
@@ -438,8 +452,9 @@ export function InboxView() {
                   resolution={latestResolution}
                   onDecide={decide}
                   deciding={deciding}
+                  canDecide={canWrite}
                 />
-                {decideError && (
+                {canWrite && decideError && (
                   <p role="alert" className="text-xs text-[var(--t-red-fg)]">
                     Không thể lưu quyết định. Vui lòng thử lại.
                   </p>
@@ -448,44 +463,55 @@ export function InboxView() {
             ) : (
               <div className="flex items-center justify-between gap-3 rounded-xl border bg-card p-4 shadow-card">
                 <p className="text-sm text-muted-foreground">
-                  Chưa có đề xuất. Để AI phân tích và đề xuất hướng xử lý.
+                  {canWrite
+                    ? "Chưa có đề xuất. Để AI phân tích và đề xuất hướng xử lý."
+                    : "Chưa có đề xuất."}
                 </p>
-                <Button
-                  onClick={processWithAI}
-                  disabled={triaging || !connected}
-                  className="shrink-0"
-                >
-                  <Sparkles /> Xử lý bằng AI
-                </Button>
+                {canWrite && (
+                  <Button
+                    onClick={processWithAI}
+                    disabled={triaging || !connected}
+                    className="shrink-0"
+                  >
+                    <Sparkles /> Xử lý bằng AI
+                  </Button>
+                )}
               </div>
             )}
 
-            <AgentActivity
-              messages={messages}
-              isStreaming={triaging}
-              onStop={stop}
-              followUp={followUp}
-              onFollowUpChange={setFollowUp}
-              onSend={sendFollowUp}
-              connected={connected}
-            />
+            {canWrite && (
+              <AgentActivity
+                messages={messages}
+                isStreaming={triaging}
+                onStop={stop}
+                followUp={followUp}
+                onFollowUpChange={setFollowUp}
+                onSend={sendFollowUp}
+                connected={connected}
+              />
+            )}
 
             {/* Warn if the AI stopped without proposing (e.g. a duplicate pending) */}
-            {!latestResolution && !triaging && messages.length > 0 && (
-              <div className="flex items-center gap-2 text-xs text-[var(--t-amber-fg)]">
-                <TriangleAlert className="size-3.5" />
-                Nếu AI dừng sớm, bấm "Xử lý bằng AI" lại hoặc hỏi thêm ở trên.
-              </div>
-            )}
+            {canWrite &&
+              !latestResolution &&
+              !triaging &&
+              messages.length > 0 && (
+                <div className="flex items-center gap-2 text-xs text-[var(--t-amber-fg)]">
+                  <TriangleAlert className="size-3.5" />
+                  Nếu AI dừng sớm, bấm "Xử lý bằng AI" lại hoặc hỏi thêm ở trên.
+                </div>
+              )}
           </div>
         )}
       </section>
 
-      <AddTransactionForm
-        open={addTransactionOpen}
-        onClose={closeAddTransaction}
-        onCreated={transactionCreated}
-      />
+      {canWrite && (
+        <AddTransactionForm
+          open={addTransactionOpen}
+          onClose={closeAddTransaction}
+          onCreated={transactionCreated}
+        />
+      )}
     </div>
   );
 }
