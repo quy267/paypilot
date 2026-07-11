@@ -24,9 +24,16 @@ import {
   type SessionIdentity
 } from "./lib/session";
 import {
+  DuplicateUsernameError,
+  WeakPasswordError,
   canWrite,
+  countAdmins,
+  createUser,
   getUserAuthByUsername,
   getUserById,
+  listUsers,
+  updateUser,
+  wouldOrphanAdmins,
   type PublicUserRow
 } from "./services/users";
 import {
@@ -113,6 +120,25 @@ const loginSchema = z.object({
   username: z.string().min(1).max(64),
   password: z.string().min(1).max(200)
 });
+const userRoleSchema = z.enum(["admin", "operator", "viewer"]);
+const createUserSchema = z.object({
+  username: z.string().min(1).max(64),
+  password: z.string().min(1).max(200),
+  role: userRoleSchema,
+  display_name: z.string().max(64).optional()
+});
+const updateUserSchema = z
+  .object({
+    role: userRoleSchema.optional(),
+    disabled: z.boolean().optional(),
+    password: z.string().min(1).max(200).optional()
+  })
+  .refine(
+    (patch) =>
+      patch.role !== undefined ||
+      patch.disabled !== undefined ||
+      patch.password !== undefined
+  );
 // Valid PBKDF2 record used only to equalize missing/disabled-user login cost.
 const DUMMY_PASSWORD_SALT = "728ef3ce65a00fb5deae456388791c44";
 const DUMMY_PASSWORD_HASH =
@@ -152,6 +178,17 @@ function ensureActiveWriter(
     return { ok: false, status: 401 };
   }
   if (!canWrite(account.role)) return { ok: false, status: 403 };
+
+  return { ok: true };
+}
+
+function ensureAdmin(
+  account: PublicUserRow | null
+): { ok: true } | { ok: false; status: 401 | 403 } {
+  if (!account || account.disabled !== 0) {
+    return { ok: false, status: 401 };
+  }
+  if (account.role !== "admin") return { ok: false, status: 403 };
 
   return { ok: true };
 }
@@ -258,6 +295,50 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
       display_name: account.display_name,
       role: account.role
     });
+  }
+
+  if (pathname === "/api/users" && request.method === "GET") {
+    const gate = ensureAdmin(account);
+    if (!gate.ok) {
+      return json(
+        { error: gate.status === 403 ? "forbidden" : "unauthorized" },
+        gate.status
+      );
+    }
+    return json({ users: await listUsers(env.DB) });
+  }
+
+  if (pathname === "/api/users" && request.method === "POST") {
+    const gate = ensureAdmin(account);
+    if (!gate.ok) {
+      return json(
+        { error: gate.status === 403 ? "forbidden" : "unauthorized" },
+        gate.status
+      );
+    }
+    if (!sameOrigin(request)) return json({ error: "forbidden" }, 403);
+
+    const body: unknown = await request.json().catch(() => ({}));
+    const parsedBody = createUserSchema.safeParse(body);
+    if (!parsedBody.success) {
+      return json(
+        { error: "Dữ liệu user không hợp lệ", code: "invalid_user" },
+        422
+      );
+    }
+
+    try {
+      const user = await createUser(env.DB, parsedBody.data);
+      return json({ user }, 201);
+    } catch (error) {
+      if (error instanceof DuplicateUsernameError) {
+        return json({ error: error.message, code: "duplicate_username" }, 409);
+      }
+      if (error instanceof WeakPasswordError) {
+        return json({ error: error.message, code: "weak_password" }, 422);
+      }
+      throw error;
+    }
   }
 
   if (pathname === "/api/stats" && request.method === "GET") {
@@ -417,6 +498,53 @@ async function handleApi(request: Request, env: Env): Promise<Response | null> {
       evidence: buildEvidence(txn),
       resolutions: await listResolutions(env.DB, id)
     });
+  }
+
+  const userMatch = pathname.match(/^\/api\/users\/([^/]+)$/);
+  if (userMatch && request.method === "PATCH") {
+    const gate = ensureAdmin(account);
+    if (!gate.ok) {
+      return json(
+        { error: gate.status === 403 ? "forbidden" : "unauthorized" },
+        gate.status
+      );
+    }
+    if (!sameOrigin(request)) return json({ error: "forbidden" }, 403);
+
+    const body: unknown = await request.json().catch(() => ({}));
+    const parsedBody = updateUserSchema.safeParse(body);
+    if (!parsedBody.success) {
+      return json(
+        { error: "Dữ liệu user không hợp lệ", code: "invalid_user" },
+        422
+      );
+    }
+
+    const id = decodeURIComponent(userMatch[1]);
+    const target = await getUserById(env.DB, id);
+    if (!target) return json({ error: "not found" }, 404);
+
+    const adminCount = await countAdmins(env.DB);
+    if (wouldOrphanAdmins(target, parsedBody.data, adminCount)) {
+      return json(
+        {
+          error: "Không thể xóa quyền của admin cuối cùng",
+          code: "last_admin"
+        },
+        409
+      );
+    }
+
+    try {
+      const user = await updateUser(env.DB, id, parsedBody.data);
+      if (!user) return json({ error: "not found" }, 404);
+      return json({ user });
+    } catch (error) {
+      if (error instanceof WeakPasswordError) {
+        return json({ error: error.message, code: "weak_password" }, 422);
+      }
+      throw error;
+    }
   }
 
   const decideMatch = pathname.match(/^\/api\/resolutions\/([^/]+)\/decide$/);

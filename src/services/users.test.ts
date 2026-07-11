@@ -11,7 +11,8 @@ import {
   getUserAuthByUsername,
   getUserById,
   listUsers,
-  updateUser
+  updateUser,
+  wouldOrphanAdmins
 } from "./users";
 
 describe("canWrite", () => {
@@ -21,6 +22,34 @@ describe("canWrite", () => {
     ["viewer", false]
   ] as const)("canWrite(%s) returns %s", (role, expected) => {
     expect(canWrite(role)).toBe(expected);
+  });
+});
+
+describe("wouldOrphanAdmins", () => {
+  const activeAdmin = {
+    id: "usr_admin",
+    username: "admin",
+    display_name: null,
+    role: "admin" as const,
+    disabled: 0,
+    created_at: 1
+  };
+
+  it("blocks demoting or disabling the only active admin", () => {
+    expect(wouldOrphanAdmins(activeAdmin, { role: "operator" }, 1)).toBe(true);
+    expect(wouldOrphanAdmins(activeAdmin, { disabled: true }, 1)).toBe(true);
+  });
+
+  it("allows safe admin updates", () => {
+    expect(wouldOrphanAdmins(activeAdmin, {}, 1)).toBe(false);
+    expect(wouldOrphanAdmins(activeAdmin, { role: "viewer" }, 2)).toBe(false);
+    expect(
+      wouldOrphanAdmins(
+        { ...activeAdmin, role: "operator" },
+        { disabled: true },
+        1
+      )
+    ).toBe(false);
   });
 });
 

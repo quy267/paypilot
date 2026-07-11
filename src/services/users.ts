@@ -36,6 +36,22 @@ export interface UpdateUserInput {
   password?: string;
 }
 
+export function wouldOrphanAdmins(
+  target: PublicUserRow,
+  patch: Pick<UpdateUserInput, "role" | "disabled">,
+  adminCount: number
+): boolean {
+  const removesAdminAccess =
+    (patch.role !== undefined && patch.role !== "admin") ||
+    patch.disabled === true;
+  return (
+    target.role === "admin" &&
+    target.disabled === 0 &&
+    removesAdminAccess &&
+    adminCount <= 1
+  );
+}
+
 export class DuplicateUsernameError extends Error {
   readonly code = "DUPLICATE_USERNAME";
 
