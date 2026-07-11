@@ -1,8 +1,9 @@
 -- PayPilot — Lược đồ cơ sở dữ liệu (D1 = SQLite)
 --
--- Hai bảng đủ cho bản tối thiểu (MVP):
+-- Ba bảng đủ cho bản tối thiểu (MVP):
 --   transactions — nguồn giao dịch lỗi/nghi ngờ để xử lý (hộp xử lý lỗi)
 --   resolutions  — AI chẩn đoán + đề xuất, nhân viên duyệt, lịch sử xử lý
+--   users        — tài khoản nhân viên và vai trò phân quyền
 --
 -- Lưu ý D1/SQLite: KHÔNG bật kiểm tra khóa ngoại (foreign key) mặc định —
 -- ràng buộc quan hệ tự lo ở tầng code.
@@ -40,3 +41,16 @@ CREATE TABLE resolutions (
 -- Chỉ mục (index): hộp xử lý luôn lọc theo trạng thái + sắp theo thời gian → tránh quét toàn bảng
 CREATE INDEX idx_transactions_inbox      ON transactions(status, created_at);
 CREATE INDEX idx_resolutions_transaction ON resolutions(transaction_id);
+
+-- Bảng người dùng: thông tin đăng nhập và phân quyền cho nhân viên vận hành
+CREATE TABLE users (
+  id                  TEXT PRIMARY KEY,            -- usr_<uuid>
+  username            TEXT NOT NULL UNIQUE,
+  display_name        TEXT,
+  password_hash       TEXT NOT NULL,               -- khóa dẫn xuất PBKDF2-SHA256 (hex)
+  password_salt       TEXT NOT NULL,               -- salt ngẫu nhiên riêng cho từng người dùng (hex)
+  password_iterations INTEGER NOT NULL,            -- số vòng PBKDF2, lưu lại để có thể nâng cấp sau
+  role                TEXT NOT NULL CHECK (role IN ('admin','operator','viewer')),
+  disabled            INTEGER NOT NULL DEFAULT 0,
+  created_at          INTEGER NOT NULL              -- thời điểm (epoch giây)
+);

@@ -16,6 +16,7 @@ import { rankInbox } from "./services/priority";
 import { inboxQuerySchema, sortScoredInbox } from "./services/inbox-query";
 import { getStats } from "./services/stats";
 import { toCsv } from "./lib/csv";
+import { constantTimeEqual } from "./lib/crypto-compare";
 import {
   ACTION_LABEL,
   DECISION_LABEL,
@@ -123,15 +124,6 @@ async function hmacHex(secret: string, value: string): Promise<string> {
 
 async function sha256Hex(value: string): Promise<string> {
   return hex(await crypto.subtle.digest("SHA-256", textEncoder.encode(value)));
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
 }
 
 function getCookie(request: Request, name: string): string | null {
