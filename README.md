@@ -55,7 +55,7 @@ Hai bảng (chi tiết trong [`schema.sql`](schema.sql), dữ liệu mẫu trong
 
 ## Tái sử dụng
 
-Xây dựa trên bản chạy thử đã triển khai thật **Agentic Copilot** (<https://agentic-copilot.trongquy267.workers.dev>): công cụ truy vấn D1, bộ nhớ hội thoại trên Durable Object, và cổng giám sát AI Gateway trở thành **bộ công cụ cho agent điều tra giao dịch**.
+Xây dựa trên bản chạy thử đã triển khai thật **Agentic Copilot** (<https://paypilot.trongquy267.workers.dev>): công cụ truy vấn D1, bộ nhớ hội thoại trên Durable Object, và cổng giám sát AI Gateway trở thành **bộ công cụ cho agent điều tra giao dịch**.
 
 ## Cách chạy schema + dữ liệu mẫu
 
